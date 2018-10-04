@@ -5,6 +5,7 @@ This python library implements methods for *optical* acquisition of the above.
 At this point, we support the following:
 - stereo camera-camera
 - structured light reconstruction
+
 and the upcoming planned features are
 - stereo camera-projector calibration
 
