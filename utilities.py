@@ -1,4 +1,12 @@
 import numpy as np
+import os
+
+
+def parallelize(setting):
+    if setting:
+        os.environ['MEGA_PARALLELIZE'] = 1
+    else:
+        os.environ['MEGA_PARALLELIZE'] = 0
 
 
 def rgb2gray(array, method="standard"):

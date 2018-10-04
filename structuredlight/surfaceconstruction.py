@@ -1,4 +1,5 @@
 import numpy as np
+import os
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 # from concurrent.futures import ProcessPoolExecutor as process_pool
 # import time  # to evaluate sppedup from parallelization
@@ -83,6 +84,8 @@ def match_epipolar_maps_sequential(maps, masks, step=1):
 
 
 def match_epipolar_maps(maps, masks, step=1):
+    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
+        return match_epipolar_maps_sequential(maps, masks, step)
     pixels = []
     pool = thread_pool()
     futures = []

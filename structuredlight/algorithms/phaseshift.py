@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import ndimage
+import os
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 import mega
 from ... import structuredlight as sl
@@ -14,6 +15,8 @@ def decode_sequential(frames):
 
 
 def decode(frames, step=1):
+    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
+        return decode(frames, step)
     phase = np.empty((2, *frames.shape[2:]), dtype=frames.dtype)
     amplitude = np.empty_like(phase)
     energy = np.empty_like(phase)

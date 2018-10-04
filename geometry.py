@@ -2,6 +2,7 @@ import numpy as np
 import scipy.spatial
 import plyfile
 import warnings
+import os
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 # from concurrent.futures import ProcessPoolExecutor as process_pool
 # import time  # to evaluate speed-up from parallelization
@@ -90,29 +91,35 @@ class pointcloud(object):
         return self
 
 
+def find_neighbors(tree, indices=slice(None), neighbors=10):
+    distances, neighbors = tree.query(tree.data[indices], k=neighbors)
+    return neighbors, distances
+
+
+def fit_planes(points, mask=None):
+    barycenters = points.mean(axis=-2)[..., None, :]
+    baryvectors = (points - barycenters)
+    if mask is not None:
+        baryvectors[~mask] *= 0
+    M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
+    eig_values, eig_vectors = np.linalg.eigh(M)
+    i = tuple(np.arange(0, eig_values.shape[i], dtype=int)
+              for i in range(0, len(eig_values.shape) - 1))
+    indices = (*i, slice(None), np.abs(eig_values).argmin(axis=-1))
+    return eig_vectors[indices]
+
+
+def align_normals(src_normals, ngb_normals):
+    ngb_product = np.einsum('...i,...i ->...', src_normals, ngb_normals)
+    flip = (1 - (ngb_product < 0).astype(int) * 2)[..., None]
+    return ngb_normals * flip
+
+
 def estimate_normals(positions, neighbor_count=10, max_distance=np.inf,
                      edge_tolerance=0.3):
-
-    def find_neighbors(tree, indices=slice(None), neighbors=10):
-        distances, neighbors = tree.query(tree.data[indices], k=neighbors)
-        return neighbors, distances
-
-    def fit_planes(points, mask=None):
-        barycenters = points.mean(axis=-2)[..., None, :]
-        baryvectors = (points - barycenters)
-        if mask is not None:
-            baryvectors[~mask] *= 0
-        M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
-        eig_values, eig_vectors = np.linalg.eigh(M)
-        i = tuple(np.arange(0, eig_values.shape[i], dtype=int)
-                  for i in range(0, len(eig_values.shape) - 1))
-        indices = (*i, slice(None), np.abs(eig_values).argmin(axis=-1))
-        return eig_vectors[indices]
-
-    def align_normals(src_normals, ngb_normals):
-        ngb_product = np.einsum('...i,...i ->...', src_normals, ngb_normals)
-        flip = (1 - (ngb_product < 0).astype(int) * 2)[..., None]
-        return ngb_normals * flip
+    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
+        return estimate_normals_sequential(positions, neighbor_count,
+                                           max_distance, edge_tolerance)
 
     N = len(positions)
     K = neighbor_count
@@ -167,6 +174,56 @@ def estimate_normals(positions, neighbor_count=10, max_distance=np.inf,
         for i, future in enumerate(futures):
             j = slice(i * step, (i + 1) * step)
             normals[neighbors[j]] = future.result()
+        source = np.unique(neighbors)
+        priority[source] = -1
+        visited[source] = True
+    return normals
+
+
+def estimate_normals_sequential(positions, neighbor_count=10,
+                                max_distance=np.inf, edge_tolerance=0.3):
+    N = len(positions)
+    K = neighbor_count
+    step = 5000 // K
+
+    tree = scipy.spatial.cKDTree(positions)
+    normals = np.empty_like(positions)
+    neighborhoods = np.empty((N, K), dtype=int)
+    distances = np.empty((N, K), dtype=float)
+
+    points = [[j for j in range(i, min(N, i + step))]
+              for i in range(0, N, step)]
+    for i, p in enumerate(points):
+        n, d = find_neighbors(tree, p, K)
+        neighborhoods[i * step:i * step + step] = n
+        distances[i * step:i * step + step] = d
+    mask = distances < max_distance
+    for i, p in enumerate(points):
+        n = fit_planes(positions[neighborhoods[p]], mask[p])
+        normals[i * step:i * step + step] = n
+
+    view = np.einsum('...i,...i ->...', normals, -positions)
+    normals *= (1 - (view < 0).astype(int) * 2)[:, None]
+    visited = np.zeros(N, dtype=bool)
+    priority = np.abs(view)
+
+    source = []
+    while not all(visited):
+        if len(source) == 0:
+            source = np.array([priority.argmax()])
+            priority[source] = -1
+            visited[source] = True
+
+        source_mask = mask[source]  # used to filter out false neighbors
+        neighbors = neighborhoods[source][source_mask]
+        source = source[np.nonzero(source_mask)[0][~visited[neighbors]]]
+        neighbors = neighbors[~visited[neighbors]]
+        edge = np.einsum('...i,...i ->...',
+                         normals[source], normals[neighbors])
+        source = source[edge > edge_tolerance]
+        neighbors = neighbors[edge > edge_tolerance]
+        src, ngb = normals[source], normals[neighbors]
+        normals[neighbors] = align_normals(src, ngb)
         source = np.unique(neighbors)
         priority[source] = -1
         visited[source] = True
