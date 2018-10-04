@@ -1,12 +1,12 @@
 import numpy as np
 
 
-def rgb2gray(array, method="opencv"):
+def rgb2gray(array, method="standard"):
     r, g, b = array[..., 0], array[..., 1], array[..., 2]
-    if method == "opencv":
-        return 0.2990 * r + 0.5870 * g + 0.1140 * b
+    if method == "standard":
+        return (r * 0.299 + g * 0.587 + b * 0.114)
     if method == "average":
-        return (r + g + b) // 3
+        return (r / 3 + g / 3 + b / 3)
 
 
 def bilinear_interpolate(array, i, j, axes=(-2, -1)):

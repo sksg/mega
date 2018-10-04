@@ -1,7 +1,7 @@
 import numpy as np
+from scipy import ndimage
 from concurrent.futures import ThreadPoolExecutor as thread_pool
-# from concurrent.futures import ProcessPoolExecutor as process_pool
-import time  # to evaluate sppedup from parallelization
+import mega
 from ... import structuredlight as sl
 
 
@@ -63,16 +63,16 @@ def stdmask(gray, background, phase, dphase, primary, cue, wave_count):
     mask[:, :, [0, -1]] = 0
     mask[:, [0, -1], :] = 0
     # Remove pixels with no neighbors
-    K = np.ones((3, 3), dtype=np.float64)
-    K[1, 1] = 0
-    neighbors = sl.filter2D(mask.astype(np.float64), -1, K)
+    weights = np.ones((1, 3, 3), dtype=int)
+    weights[0, 1, 1] = 0
+    neighbors = ndimage.convolve(mask.astype(int), weights, mode='constant')
     mask = np.logical_and(mask, neighbors > 1)
     return mask
 
 
 def reconstruct(calibration, lit, dark, primary, cue, wave_count, shift=None):
-    gray, background = sl.grayscale(lit), sl.grayscale(dark)
-    primary, cue = sl.grayscale(primary), sl.grayscale(cue)
+    gray, background = mega.rgb2gray(lit), mega.rgb2gray(dark)
+    primary, cue = mega.rgb2gray(primary), mega.rgb2gray(cue)
     phase, dphase, primary, cue = decode_with_cue(primary, cue, wave_count)
     if shift is not None:
         phase += shift
@@ -81,11 +81,11 @@ def reconstruct(calibration, lit, dark, primary, cue, wave_count, shift=None):
     phase *= phase.shape[2] / (2 * np.pi)
 
     indices = sl.match_epipolar_maps(phase, mask)
-    colors = np.mean([sl.bilinear_interpolate(lit[i],
-                                              indices[i, :, 0],
-                                              indices[i, :, 1],
-                                              axes=(0, 1))
+    colors = np.mean([mega.bilinear_interpolate(lit[i],
+                                                indices[i, :, 0],
+                                                indices[i, :, 1],
+                                                axes=(0, 1))
                       for i in range(len(lit))], axis=0)
     points = sl.triangulate_epipolar(calibration, indices)
-    normals = sl.estimate_normals(points)
-    return sl.pointcloud(points, colors, normals)
+    normals = mega.estimate_normals(points)
+    return mega.pointcloud(points, colors, normals)

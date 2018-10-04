@@ -47,13 +47,12 @@ class pointcloud(object):
             vertex['z'] = self.positions[:, 2].astype('f4')
 
         if self.colors is not None:
-            # BGR format
-            vertex['blue'] = self.colors[:, 0].astype('u1')
+            # assuming RGB format
+            vertex['red'] = self.colors[:, 0].astype('u1')
             vertex['green'] = self.colors[:, 1].astype('u1')
-            vertex['red'] = self.colors[:, 2].astype('u1')
+            vertex['blue'] = self.colors[:, 2].astype('u1')
 
         if self.normals is not None:
-            # BGR format
             vertex['nx'] = self.normals[:, 0].astype('f4')
             vertex['ny'] = self.normals[:, 1].astype('f4')
             vertex['nz'] = self.normals[:, 2].astype('f4')
