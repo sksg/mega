@@ -11,5 +11,6 @@ and the upcoming planned features are
 We'll keep updating the code, and more features will join as we progress.
 
 # Authors
-Søren K.S. Gregersen || Postdoc researcher at DTU Compute, Denmark
-Mads Doest || Ph.D. student at DTU Compute, Denmark
+- Søren K.S. Gregersen || Postdoc researcher at DTU Compute, Denmark
+
+- Mads Doest || Ph.D. student at DTU Compute, Denmark
