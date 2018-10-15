@@ -1,5 +1,6 @@
 import numpy as np
 import os
+from scipy.optimize import minimize
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 # from concurrent.futures import ProcessPoolExecutor as process_pool
 # import time  # to evaluate sppedup from parallelization
@@ -83,9 +84,7 @@ def match_epipolar_maps_sequential(maps, masks, step=1):
     return np.hstack(pixels)
 
 
-def match_epipolar_maps(maps, masks, step=1):
-    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
-        return match_epipolar_maps_sequential(maps, masks, step)
+def match_epipolar_maps_parallel(maps, masks, step=1):
     pixels = []
     pool = thread_pool()
     futures = []
@@ -98,3 +97,21 @@ def match_epipolar_maps(maps, masks, step=1):
             ith_pixels[:, :, 0] += i
             pixels.append(ith_pixels)
     return np.hstack(pixels)
+
+
+def match_epipolar_maps(maps, masks, step=1):
+    if os.environ.get('MEGA_PARALLELIZE', default=False):
+        return match_epipolar_maps_parallel(maps, masks, step)
+    else:
+        return match_epipolar_maps_sequential(maps, masks, step)
+
+
+def normals_from_projection(lambda_p, lambda_c, omega_p, omega_c, p, c):
+    X = _vectordot(omega_p, lambda_c) * p - _vectordot(p, lambda_c) * omega_p
+    Y = _vectordot((lambda_p - lambda_c), lambda_c) * p
+    Y -= _vectordot(p, lambda_c) * lambda_p
+    normals = np.cross(X, Y)
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    print("|A.cross(B)|", lengths.min(), lengths.mean(), lengths.max())
+    print("|A.cross(B)| == 0", (lengths < 1e-2).sum())
+    return normals / lengths

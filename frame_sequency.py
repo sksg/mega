@@ -2,15 +2,15 @@ import numpy as np
 import imageio, os, re
 
 
-def write_frame(path, frame):
+def write_frame(path, frame, format=None):
     return imageio.imwrite(path, frame)
 
 
-def write_frame_sequence(directory, frames):
-    path = directory + "/frames{}_{}.png"
+def write_frame_sequence(directory, frames, extension="png", format=None):
+    path = directory + "/frames{}_{}." + extension
     for i in range(frames.shape[0]):
         for j in range(frames.shape[1]):
-            write_frame(path.format(i, j), frames[i, j])
+            write_frame(path.format(i, j), frames[i, j], format)
 
 
 def read_frame(frame):

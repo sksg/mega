@@ -19,9 +19,11 @@ class calibration:
             self.rotation = None
             self.projection = None
             self.distortion = None
+            self.frame_size = None
 
     def __init__(self, cvFS=None, frame_size=None):
         self.cam0, self.cam1 = calibration.camera(), calibration.camera()
+        self.projector = None
         self.frame_size = None
         self.rectified_cam0 = calibration.camera()
         self.rectified_cam1 = calibration.camera()
@@ -46,23 +48,31 @@ class calibration:
         self.cam0.projection[:3, :3] = self.cam0.intrinsic
 
         self.cam1.intrinsic = fs.getNode("K1").mat().astype(np.float64)
-        self.cam0.focal_vector = np.array((self.cam1.intrinsic[0, 0],
+        self.cam1.focal_vector = np.array((self.cam1.intrinsic[0, 0],
                                            self.cam1.intrinsic[1, 1]))
         self.cam1.distortion = fs.getNode("k1").mat().astype(np.float64)
-        self.cam1.position = fs.getNode("T1").mat()[:, 0].astype(np.float64)
+        self.cam1.position = - fs.getNode("T1").mat()[:, 0].astype(np.float64)
         self.cam1.rotation = fs.getNode("R1").mat().astype(np.float64)
         self.cam1.projection = np.empty((3, 4))
         self.cam1.projection[:3, :3] = self.cam1.intrinsic @ self.cam1.rotation
         self.cam1.projection[:3, 3] = self.cam1.intrinsic @ self.cam1.position
 
     def set_frame_size(self, frame_size):
+        self.cam0.frame_size = frame_size
+        self.cam1.frame_size = frame_size
         self.frame_size = frame_size
         rect = cv2.stereoRectify(self.cam0.intrinsic, self.cam0.distortion,
                                  self.cam1.intrinsic, self.cam1.distortion,
-                                 R=self.cam1.rotation, T=self.cam1.position,
+                                 R=self.cam1.rotation, T=-self.cam1.position,
                                  imageSize=frame_size, flags=0)
         self.rectified_cam0.rotation = rect[0]
         self.rectified_cam1.rotation = rect[1]
+        self.rectified_cam0.position = self.cam0.position.copy()
+        self.rectified_cam1.position = self.cam1.position.copy()
+        self.rectified_cam0.intrinsic = self.cam0.intrinsic.copy()
+        self.rectified_cam1.intrinsic = self.cam1.intrinsic.copy()
+        self.rectified_cam0.focal_vector = self.cam0.focal_vector.copy()
+        self.rectified_cam1.focal_vector = self.cam1.focal_vector.copy()
         self.rectified_cam0.projection = rect[2]
         self.rectified_cam1.projection = rect[3]
         self.disparity_to_depth_map = rect[4]
@@ -85,16 +95,16 @@ class calibration:
         channels = kwargs.pop("channels", None)
         shape = frames.shape
         # shape = (*array_shape, height, width[, channels])
+        axes = (-1, -2)
         if channels != 1 or frames[-1] <= 4:  # We assume that width > 4
-            frame_size = (shape[-2], shape[-3])
-        else:
-            frame_size = (shape[-1], shape[-2])
+            axes = (-2, -3)
+        frame_size = (shape[axes[0]], shape[axes[1]])
 
         if self.frame_size != frame_size:
             self.set_frame_size(frame_size)
 
-        result = np.empty((shape[1], shape[0], *shape[2:]), dtype=frames.dtype)
+        result = np.empty_like(frames)
         for i in range(frames.shape[1]):
             for j, (mx, my) in zip((0, 1), self.rectify_maps):
-                result[i, j] = cv2.remap(frames[j, i], mx, my, interpolation)
-        return np.swapaxes(result, 0, 1)
+                result[j, i] = cv2.remap(frames[j, i], mx, my, interpolation)
+        return result
