@@ -11,17 +11,20 @@ class Camera:
         P = K[Rt]
         
         Camera position in world space is -R't
-        
+        type
     """
     
-    def PfromKRt(K, R, t):
+    def PfromKRt(self, K, R, t):
+        if len(t.shape) == 1:
+            t = t[:, np.newaxis]
         return np.array(np.mat(K) * np.mat(np.concatenate((R, t), axis=1)))
     
-    def __init__(self, K=None, R=None, t=None):
+    def __init__(self, K=None, R=None, t=None, distortion=None):
         self._K = K
         self._R = R
         self._t = t
-        self._P = PfromKRt(K, R, t)
+        self._distortion = distortion
+        self._P = self.PfromKRt(K, R, t)
         
     
     @property
@@ -31,13 +34,21 @@ class Camera:
     @K.setter
     def K(self, K):
         self._K = K
+
+    @property
+    def distortion(self):
+        return self._distortion
+    
+    @distortion.setter
+    def distortion(self, distiortion):
+        self._distortion = distiortion
     
     @property
     def R(self):
         return self._R
     
     @R.setter
-    def K(self, R):
+    def R(self, R):
         self._R = R
     
     @property
@@ -136,9 +147,9 @@ class CameraCalibration:
     def calibrate_camera(self, images):
         for index, image in enumerate(images):
             
-            shape = image.shape
+            self.image_shape = image.shape
             
-            if len(shape) > 2:
+            if len(self.image_shape) > 2:
                 # case is RGB
                 corrected_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             else:
@@ -195,5 +206,28 @@ class StereoCalibration:
         Stereo calibration class
     """
     
-    def __init__(self):
+    def __init__(self, calibration_object, camera_0_images, camera_1_images, resize_scale=None):
+        self.resize_scale = resize_scale
+        self.calibration_object = calibration_object
+        self.camera_0_cali = CameraCalibration(calibration_object = calibration_object, resize_scale=resize_scale)
+        self.camera_0_cali.calibrate_camera(images=camera_0_images)
+        self.camera_1_cali = CameraCalibration(calibration_object = calibration_object, resize_scale=resize_scale)
+        self.camera_1_cali.calibrate_camera(images=camera_1_images)
+
+        # Stereo calibration
+        # Temporary solution
+        # See https://docs.opencv.org/3.4/d9/d0c/group__calib3d.html#ga91018d80e2a93ade37539f01e6f07de5
         
+        c0 = self.camera_0_cali
+        c1 = self.camera_1_cali
+
+        self.stereo_result = cv2.stereoCalibrate(c0._object_points, c0._image_points, c1._image_points, c0.K, c0.distortion, c1.K, c1.distortion, c0.image_shape[0:2])
+        
+        #sret, slcammat, sldist, srcammat, srdist, R, T, E, F = cv2.stereoCalibrate(camera_0_cali._object_points, camera_0_cali._image_points, camera_1_cali._image_points, camera_0_cali.K, camera_0_cali.distortion, camera_1_cali.K, camera_1_cali.distortion, camera_0_images[0].shape[:-1])
+        self.RMS_reprojection_error = self.stereo_result[0]
+        self.camera_0 = Camera(K=self.stereo_result[1], R=np.eye(3), t=np.zeros(3), distortion=self.stereo_result[2])
+        self.camera_1 = Camera(K=self.stereo_result[3], R=self.stereo_result[5], t=self.stereo_result[6], distortion=self.stereo_result[4])
+        self.E = self.stereo_result[7]
+        self.F = self.stereo_result[8]
+
+    
