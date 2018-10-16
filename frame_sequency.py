@@ -1,9 +1,9 @@
 import numpy as np
-import imageio, os, re
+import os, re, cv2
 
 
 def write_frame(path, frame, format=None):
-    return imageio.imwrite(path, frame)
+    return cv2.imwrite(path, frame)
 
 
 def write_frame_sequence(directory, frames, extension="png", format=None):
@@ -16,14 +16,14 @@ def write_frame_sequence(directory, frames, extension="png", format=None):
 def read_frame(frame):
     if not os.path.exists(frame):
         raise RuntimeError("Missing frame " + frame + " for stereo sequence.")
-    return imageio.imread(frame)
+    return cv2.imread(frame)
 
 
 def read_frame_sequence(directory):
     rexp = r'frames[0-1]_[0-9]*.png'
     N = len([f for f in os.listdir(directory) if re.match(rexp, f)]) // 2
     path = directory + "/frames{}_{}.png"
-    frame00 = imageio.imread(path.format(0, 0))
+    frame00 = cv2.imread(path.format(0, 0))
     frames = np.empty((2, N, *frame00.shape), dtype=frame00.dtype)
     frames[0, 0] = frame00
     for i in (0, 1):

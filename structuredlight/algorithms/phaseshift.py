@@ -54,39 +54,36 @@ def decode_with_cue(primary, cue, wave_count):
     return phase, dphase, primary, cue
 
 
-def stdmask(gray, background, phase, dphase, primary, cue, wave_count):
+def stdmask(lit, gray, background, phase, dphase, primary, cue, wave_count):
     # Threshold on saturation and under exposure
     adjusted = gray - background
 
     def print_masked(path, mask):
-        frame = adjusted.copy()
-        frame[mask] += 0.5
-        frame = np.clip(frame, 0, 1) * 255
-        mega.write_frame(path, frame)
+        frame = lit.copy()
+        frame[mask] += np.array([1, 0, 0])
+        frame = (np.clip(frame, 0, 1) * 255).astype('u1')
+        for i in (0, 1):
+            print("write_frame", path.format(i))
+            mega.write_frame(path.format(i), frame[i])
 
     if adjusted.dtype == np.dtype('u1'):
+        value_range = 255
         mask = np.logical_and(adjusted > 255 * 0.1, adjusted < 255 * 0.95)
     else:
+        value_range = 1
         # Assume HDR acquisition, and that only valid values are present
         mask = np.ones_like(adjusted, dtype=bool)
     # Threshold on amplitude at primary frequency
-    mask = np.logical_and(mask, primary[1] > 2.0 * wave_count)
-    print_masked("mask01_0.png", mask[0])
-    print_masked("mask01_1.png", mask[1])
+    primary_amplitude = primary[1]
+    mask = np.logical_and(mask, primary_amplitude > 0.2 * value_range)
     # Threshold on amplitudes versus total energy
-    mask = np.logical_and(mask, primary[1] > 0.25 * primary[2])
-    print_masked("mask02_0.png", mask[0])
-    print_masked("mask02_1.png", mask[1])
-    mask = np.logical_and(mask, cue[1] > 0.25 * cue[2])
-    print_masked("mask03_0.png", mask[0])
-    print_masked("mask03_1.png", mask[1])
+    primary_energy = primary[2]
+    mask = np.logical_and(mask, primary_amplitude > 0.25 * primary_energy)
+    cue_amplitude, cue_energy = cue[1:]
+    mask = np.logical_and(mask, cue_amplitude > 0.25 * cue_energy)
     # Threshold on gradient of phase. Cannot be too large or too small
     mask = np.logical_and(mask, np.linalg.norm(dphase, axis=3) < 0.02)
-    print_masked("mask04_0.png", mask[0])
-    print_masked("mask04_1.png", mask[1])
     mask = np.logical_and(mask, np.linalg.norm(dphase, axis=3) > 1e-8)
-    print_masked("mask05_0.png", mask[0])
-    print_masked("mask05_1.png", mask[1])
     # Cannot must point at least slightly to the left side
     mask = np.logical_and(mask, dphase[:, :, :, 1] > 1e-8)
     # Remove border
@@ -97,8 +94,6 @@ def stdmask(gray, background, phase, dphase, primary, cue, wave_count):
     weights[0, 1, 1] = 0
     neighbors = ndimage.convolve(mask.astype(int), weights, mode='constant')
     mask = np.logical_and(mask, neighbors > 1)
-    print_masked("mask06_0.png", mask[0])
-    print_masked("mask06_1.png", mask[1])
     return mask
 
 
@@ -109,7 +104,7 @@ def reconstruct(calibration, lit, dark, primary, cue, wave_count, shift=None,
     phase, dphase, primary, cue = decode_with_cue(primary, cue, wave_count)
     if shift is not None:
         phase += shift
-    mask_args = gray, background, phase, dphase, primary, cue, wave_count
+    mask_args = lit, gray, background, phase, dphase, primary, cue, wave_count
     mask = stdmask(*mask_args)
     phase *= phase.shape[2] / (2 * np.pi)
 
@@ -119,6 +114,8 @@ def reconstruct(calibration, lit, dark, primary, cue, wave_count, shift=None,
                                                 indices[i, :, 1],
                                                 axes=(0, 1))
                       for i in range(len(lit))], axis=0)
+    if colors.dtype != np.dtype('u1'):
+        colors = (np.clip(colors, 0, 1) * 255).astype('u1')
     points = sl.triangulate_epipolar(calibration, indices)
     if calibration.projector is None and estimate_projector:
         calibration.projector = sl.calibration.camera()
