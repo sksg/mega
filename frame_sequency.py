@@ -1,5 +1,7 @@
 import numpy as np
-import imageio, os, re
+import imageio
+import os
+import re
 
 
 def write_frame(path, frame):
