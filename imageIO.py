@@ -10,10 +10,18 @@ def imread(path):
     return cv2.imread(path)
 
 
-def read_images(path, rexp=r'.*\.png'):
+def imwrite(path):
+    return cv2.imwrite(path)
+
+
+def read_images(path, rexp=r'.*\.png', sort=None, filter=None):
     files = [os.path.join(path, f)
              for f in os.listdir(path)
              if re.match(rexp, f)]
+    if filter is not None:
+        files = filter(files)
+    if sort is not None:
+        files = sort(files)
     image0 = imread(files[0])
     images = np.empty((len(files), *image0.shape), dtype=image0.dtype)
     images[0] = image0

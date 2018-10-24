@@ -112,10 +112,3 @@ class cameras_from_images:
 
     def reprojection_error(self):
         return reprojection_error(self.points3D, self.points2D, self.cameras)
-
-
-def undistort_rectify_maps(camera, image_shape):
-    image_shape = image_shape[1], image_shape[0]
-    return cv2.initUndistortRectifyMap(camera.K, camera.distortion,
-                                       camera.R, camera.P,
-                                       image_shape, cv2.CV_32F)
