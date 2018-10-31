@@ -22,25 +22,67 @@ def _vectordot(u, v, *args, **kwargs):
     return np.einsum('...i,...i ->...', u, v).reshape(*u.shape[:-1], 1)
 
 
-def triangulate(calibration, indices):
-    """Finds mid point between two pixel rays"""
-    d = calibration.cam0.position - calibration.cam1.position
-    p = calibration.to_focal_plane(indices)
-    v0 = _normalize(p[0] - calibration.cam0.position, axis=1)
-    v1 = _normalize(p[1] - calibration.cam1.position, axis=1)
-    d_v0 = _vectordot(d, v0)
-    d_v1 = _vectordot(d, v1)
-    w = _vectordot(v0, v1)
-    c0 = (d_v1 * w - d_v0) / (1 - w**2)
-    c1 = (d_v1 - d_v0 * w) / (1 - w**2)
-    p0 = calibration.cam0.position + c0 * v0
-    p1 = calibration.cam1.position + c1 * v1
-    return (p0 + p1) / 2
+def triangulate(camera0, camera1, indices, offset=None, factor=None,
+                image_shape=None):
+    if offset is None or factor is None:
+        P0 = camera0.P
+        P1 = camera1.P
+        e = np.eye(4, dtype=np.float32)
+        C = np.empty((4, 3, 3, 3), np.float32)
+        for i in np.ndindex((4, 3, 3, 3)):
+            tmp = np.stack((P0[i[1]], P0[i[2]], P1[i[3]], e[i[0]]), axis=0)
+            C[i] = np.linalg.det(tmp.T)
+        C = C[..., None, None]
+        vu = np.mgrid[0:image_shape[-3], 0:image_shape[-2]]
+        v, u = vu[None, 0, :, :], vu[None, 1, :, :]
+        offset = C[:, 0, 1, 0] - C[:, 2, 1, 0] * u - C[:, 0, 2, 0] * v
+        factor = -C[:, 0, 1, 2] + C[:, 2, 1, 2] * u + C[:, 0, 2, 2] * v
+    idx = (slice(None), *indices[0].astype(int).T)
+    xyzw = offset[idx] + factor[idx] * indices[None, 1, :, 1]
+    return xyzw.T[:, :3] / xyzw.T[:, 3, None]
 
 
-def triangulate_epipolar(calibration, indices):
-    R0 = calibration.rectified_cam0.rotation.T
-    Q = calibration.disparity_to_depth_map
+def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
+                           p_gradients, c_gradients):
+        def normalize(v):
+            return v / np.linalg.norm(v, axis=-1, keepdims=True)
+        p = points3D - projector.position
+        c = points3D - camera.position
+        p_grad = np.zeros_like(points3D)
+        c_grad = np.zeros_like(points3D)
+
+        # Pick relevant gradients:
+        p_grad[:, :2] = p_gradients[(*p_pixels.astype(int).T,)]
+        c_grad[:, :2] = c_gradients[(*c_pixels.astype(int).T,)]
+        # Invert gradients to get the periodic vectors (lambda)
+        p_lambda = p_grad / (p_grad * p_grad).sum(-1, keepdims=True)
+        c_lambda = c_grad / (c_grad * c_grad).sum(-1, keepdims=True)
+        # Project to the point depth
+        p_lambda[:, :2] *= p[:, -1, None] / projector.focal_vector
+        c_lambda[:, :2] *= c[:, -1, None] / camera.focal_vector
+        # Rotate into common world space
+        p_lambda = p_lambda.dot(projector.R.T)
+        c_lambda = c_lambda.dot(camera.R.T)
+        # Make perpendicular to rays (needed for formulas below)
+        p = normalize(p)
+        c = normalize(c)
+        p_lambda -= _vectordot(p_lambda, p) * p
+        c_lambda -= _vectordot(c_lambda, c) * c
+        # Finally, we make orthonormal sets x, x_lambda, x_omega
+        p_omega = normalize(np.cross(p, p_lambda))
+        c_omega = normalize(np.cross(c, c_lambda))
+
+        # normals from projection (see paper)
+        X = _vectordot(p_omega, c_lambda) * p
+        X -= _vectordot(p, c_lambda) * p_omega
+        Y = _vectordot((p_lambda - c_lambda), c_lambda) * p
+        Y -= _vectordot(p, c_lambda) * p_lambda
+        return normalize(np.cross(X, Y))
+
+
+def triangulate_epipolar(stereo, indices):
+    R0 = stereo.rectified[0].R.T
+    Q = stereo.Q
     disparity = indices[0, None, :, 1] - indices[1, None, :, 1]
     I1 = np.ones(disparity.shape)
     depth_map = Q.dot(np.vstack((indices[0, :, ::-1].T, disparity, I1)))
