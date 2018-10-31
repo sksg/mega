@@ -48,25 +48,27 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
             return v / np.linalg.norm(v, axis=-1, keepdims=True)
         p = points3D - projector.position
         c = points3D - camera.position
+        p_grad = np.zeros_like(points3D)
+        c_grad = np.zeros_like(points3D)
 
         # Pick relevant gradients:
-        p_gradient = p_gradient[(*p_pixels.astype(int).T,)]
-        c_gradient = c_gradient[(*c_pixels.astype(int).T,)]
+        p_grad[:, :2] = p_gradients[(*p_pixels.astype(int).T,)]
+        c_grad[:, :2] = c_gradients[(*c_pixels.astype(int).T,)]
         # Invert gradients to get the periodic vectors (lambda)
-        p_lambda = p_gradient / np.linalg.norm(p_gradient, axis=-1)[..., None]
-        c_lambda = c_gradient / np.linalg.norm(c_gradient, axis=-1)[..., None]
+        p_lambda = p_grad / (p_grad * p_grad).sum(-1, keepdims=True)
+        c_lambda = c_grad / (c_grad * c_grad).sum(-1, keepdims=True)
         # Project to the point depth
-        p_lambda *= p[:, -1, None] / projector.focal_vector
-        c_lambda *= c[:, -1, None] / camera.focal_vector
+        p_lambda[:, :2] *= p[:, -1, None] / projector.focal_vector
+        c_lambda[:, :2] *= c[:, -1, None] / camera.focal_vector
         # Rotate into common world space
-        p_lambda = p_lambda.dot(projector.R)
-        c_lambda = c_lambda.dot(camera.R)
+        p_lambda = p_lambda.dot(projector.R.T)
+        c_lambda = c_lambda.dot(camera.R.T)
         # Make perpendicular to rays (needed for formulas below)
-        p_lambda -= p_lambda.dot(p)
-        c_lambda -= c_lambda.dot(c)
-        # Finally, we make orthonormal sets x, x_lambda, x_omega
         p = normalize(p)
         c = normalize(c)
+        p_lambda -= _vectordot(p_lambda, p) * p
+        c_lambda -= _vectordot(c_lambda, c) * c
+        # Finally, we make orthonormal sets x, x_lambda, x_omega
         p_omega = normalize(np.cross(p, p_lambda))
         c_omega = normalize(np.cross(c, c_lambda))
 

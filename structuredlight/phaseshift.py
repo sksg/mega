@@ -3,7 +3,7 @@ from scipy import ndimage
 import os
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 import mega
-from ... import structuredlight as sl
+from .. import structuredlight as sl
 
 
 def _ndtake(indices, axis):  # simple slicing, much faster than np.take
