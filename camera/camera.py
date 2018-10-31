@@ -15,6 +15,9 @@ class camera:
     distortion : (N,) arraylike, optional
         The camera distortion vector. Can be arbitrarily long. Stored under
         self.distortion. Do not use with flat.
+    P : (3, 4) arraylike, optional
+        The camera projection vector. Used to estimate K and t. Do not use with
+        explicit K or t.
     flat : (21 + N,) arraylike, optional
         The camera flat vector. Must be at least 21 elements long. Views of
         flat are stored under self.K, self.R, self.t, and self.distortion.
@@ -30,20 +33,62 @@ class camera:
     The class does not attempt to copy any array data when initiated.
     Use the member copy() to force copy all internal data structures.
     """
-    def __init__(self, K=None, R=None, t=None, distortion=None, flat=None,
-                 warn_on_ambiguity=True):
+    def __init__(self, K=None, R=None, t=None, distortion=None, P=None,
+                 flat=None, warn_on_ambiguity=True):
         if flat is not None:
-            if warn_on_ambiguity and any(v is not None for v in (K, R, t)):
+            if warn_on_ambiguity and any(v is not None for v in (K, R, t, P)):
                 print("Camera warning: K, R, t take precedence over flat.")
             else:
                 K = flat[:9].reshape((3, 3))
                 R = flat[9:18].reshape((3, 3))
                 t = flat[18:21]
                 distortion = flat[21:]
-        self.K = K
-        self.R = R
-        self.t = t
-        self.distortion = distortion
+        if P is not None and R is not None:
+            if warn_on_ambiguity and any(v is not None for v in (K, t)):
+                print("Camera warning: K, R, t take precedence over R, P.")
+            else:
+                K = P[:3, :3].dot(R.T)
+                t = np.linalg.inv(K).dot(P[:3, 3])
+        if K is None:
+            raise RuntimeError("Camera Error: Missing camera matrix K.")
+        if R is None:
+            R = np.eye(3, dtype=K.dtype)
+        if t is None:
+            t = np.zeros((3,), dtype=K.dtype)
+        if distortion is None:
+            distortion = np.array(tuple())
+        self._K = K.astype(np.float32)
+        self._R = R.astype(np.float32)
+        self._t = t.astype(np.float32)
+        self.distortion = distortion.astype(np.float32)
+        self._P_cache = None
+
+    @property
+    def K(self):
+        return self._K
+
+    @K.setter
+    def K(self, K):
+        self._K = K
+        self._P_cache = None
+
+    @property
+    def R(self):
+        return self._R
+
+    @R.setter
+    def R(self, R):
+        self._R = R
+        self._P_cache = None
+
+    @property
+    def t(self):
+        return self._t
+
+    @t.setter
+    def t(self, t):
+        self._t = t
+        self._P_cache = None
 
     @property
     def position(self):
@@ -53,8 +98,10 @@ class camera:
     @property
     def P(self):
         """Projection matrix, (3, 4) array. Calculated at calltime."""
-        if all(v is not None for v in (self.K, self.R, self.t)):
-            return self.K.dot(np.c_[self.R, self.t])
+        if self._P_cache is None:
+            if all(v is not None for v in (self.K, self.R, self.t)):
+                    self._P_cache = self.K.dot(np.c_[self.R, self.t])
+            return self._P_cache
 
     @property
     def focal_vector(self):
@@ -71,22 +118,16 @@ class camera:
         return np.r_[self.K.flatten(), self.R.flatten(),
                      self.t, self.distortion]
 
+    def relative_to(self, other):
+        R = self.R.dot(other.R.T)
+        t = R.dot(other.position - self.position)
+        return R, t
+
     def project(self, points3D):
-        points3D = np.asanyarray(points3D)
-        points2D = np.empty(points3D.shape, points3D.dtype)
-        if points3D.dtype != object:  # Standard numeric array
+        if isinstance(points3D[0], np.ndarray) and points3D[0].shape == (3,):
             args = self.R, self.t, self.K, self.distortion
-            p3D = points3D.reshape(-1, 3)
-            p2D, _ = cv2.projectPoints(p3D, *args)
-            points2D.reshape(-1, 2)[:] = p2D
-        else:
-            for idx in np.ndindex(points3D.shape):
-                p3D = points3D[idx]
-                if p3D is None:
-                    points2D[idx] = None
-                else:  # Must be an array
-                    points2D[idx] = self.project(p3D)
-        return points2D
+            return cv2.projectPoints(points3D, *args)[0][..., ::-1]
+        return [self.project(p3D) for p3D in points3D]
 
     def __repr__(self):
         def arr2str(s, A):
@@ -99,33 +140,12 @@ class camera:
                 arr2str("\n       distortion: ", self.distortion) + "}")
 
 
-def project_in_cameras(points3D, cameras):
+def camera_project(points3D, cameras):
     points3D, cameras = np.asanyarray(points3D), np.asanyarray(cameras)
-    points2D = np.empty(cameras.shape, object)
-    points2D.fill(None)
-    is_trivial_array = True
-    if points3D.dtype != object:  # Standard numeric array
-        # Broadcast arrays (nontrivial as the shapes are not equal)
-        if len(points3D.shape[:-1]) > len(cameras.shape):
-            cameras = np.broadcast_to(cameras, points3D.shape[:-1])
-        elif len(points3D.shape[:-1]) < len(cameras.shape):
-            points3D = np.broadcast_to(points3D, cameras.shape + (3,))
-    else:
-        # We must assume that the shapes can match.
-        points3D, cameras = np.broadcast_arrays(points3D, cameras)
-        is_trivial_array = False
-    for idx in np.ndindex(cameras.shape):
-        p3D, cam = points3D[idx], cameras[idx]
-        if cam is None or p3D is None:
-            points2D[idx] = None
-            is_trivial_array = False
-        elif isinstance(cam, camera):
-            points2D[idx] = cam.project(p3D)
-        else:  # must be an array of cameras
-            points2D[idx] = project_cameras(p3D, cam)
-            is_trivial_array = False
-    if is_trivial_array:
-        points2D = points2D.astype(points3D.dtype)
+    shape = cameras.shape
+    points2D = np.empty(shape, object)
+    for idx in np.ndindex(shape):
+        points2D[idx] = cameras[idx].project(points3D[idx])
     return points2D
 
 
@@ -135,13 +155,10 @@ def save_cameras(filename, cameras):
     cameras = np.asanyarray(cameras)
     result = np.empty(cameras.shape + __MAX_CAMERA_FLAT__, object)
     for idx in np.ndindex(cameras.shape):
-        if cameras[idx] is not None:
-            flat_cam = cameras[idx].flatten()
-            if result.dtype == object:
-                result = result[..., :len(flat_cam)].astype(flat_cam.dtype)
-            result[idx] = flat_cam
-        else:
-            result[idx] = np.nan
+        flat_cam = cameras[idx].flatten()
+        if result.dtype == object:
+            result = result[..., :len(flat_cam)].astype(flat_cam.dtype)
+        result[idx] = flat_cam
     np.save(filename, result)
 
 
