@@ -35,7 +35,7 @@ class Camera:
         return self._R
 
     @R.setter
-    def K(self, R):
+    def R(self, R):
         self._R = R
 
     @property
