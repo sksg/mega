@@ -2,6 +2,19 @@ import numpy as np
 import cv2
 
 
+def _cv_shape(shape):
+    """Open CV always works in column-row order. We do the opposite."""
+    return (shape[1], shape[0]) if len(shape) < 3 else (shape[-2], shape[-3])
+
+
+def _cv_pixels(points2D):
+    """Open CV always works in column-row order. We do the opposite."""
+    if isinstance(points2D, np.ndarray):
+        return points2D[..., ::-1].astype(np.float32)
+    else:
+        return [_cv_pixels(p2D) for p2D in points2D]
+
+
 def rescale(images, scale, scale_W=None):
     H, W, C = images.shape[-3:]
     if scale_W is None:
@@ -41,22 +54,23 @@ def rectified_stereo_disparity_to_depth(cameras):
 
 
 def single_undistort(camera, image_shape):
-    image_shape = image_shape[1], image_shape[0]
     return cv2.initUndistortRectifyMap(camera.K, camera.distortion,
                                        np.eye(3, dtype=np.float32),
-                                       camera.K, image_shape, cv2.CV_32F)
+                                       camera.K, _cv_shape(image_shape),
+                                       cv2.CV_32F)
 
 
 def undistort_points(camera, points2D):
-    p2D = cv2.undistortPoints(points2D[None, :], camera.K, camera.distortion)
-    return np.squeeze(p2D)
+    shape = points2D.shape
+    p2D = _cv_pixels(points2D.reshape((1, -1, *shape[-1:])))
+    p2D = cv2.undistortPoints(p2D, camera.K, camera.distortion, P=camera.K)
+    return _cv_pixels(p2D).reshape(shape)
 
 
 def single_undistort_and_rectify(camera, new_camera, image_shape):
-    image_shape = image_shape[1], image_shape[0]
     return cv2.initUndistortRectifyMap(camera.K, camera.distortion,
                                        new_camera.R, new_camera.P,
-                                       image_shape, cv2.CV_32F)
+                                       _cv_shape(image_shape), cv2.CV_32F)
 
 
 def undistort(cameras, image_shape):

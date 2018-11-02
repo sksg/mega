@@ -14,7 +14,7 @@ def decode_vectorized(data, axis=-4):
     axis = axis + int(axis < 0) * data.ndim
     dft = np.fft.fft(data, axis=axis)
     order1st = _ndtake(1, axis)  # first order Fourier transform
-    phase = 2.0 * np.pi - np.angle(dft[order1st])
+    phase = np.mod(-np.angle(dft[order1st]), 2 * np.pi)
     amplitude = np.absolute(dft[order1st])
     power = np.absolute(dft[_ndtake(slice(1, None), axis)]).sum(axis=axis)
     return phase, amplitude, power
@@ -52,40 +52,9 @@ def unwrap_phase_with_cue(phase, cue, wave_count):
     return (phase + (2 * np.pi * P)) / wave_count
 
 
-def decode_with_cue_vectorized(primary, cue, wave_count, axis=-4):
-    primary = decode_vectorized(primary, axis)
-    cue = decode_vectorized(cue, axis)
-    phase = unwrap_phase_with_cue(primary[0], cue[0], wave_count)
-    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
-    return phase, dphase, primary, cue
-
-
-def decode_with_cue_sequential(primary, cue, wave_count, axis=-4):
-    primary = decode_sequential(primary, axis)
-    cue = decode_sequential(cue, axis)
-    phase = unwrap_phase_with_cue(primary[0], cue[0], wave_count)
-    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
-    return phase, dphase, primary, cue
-
-
-def decode_with_cue_parallel(primary, cue, wave_count, axis=-4):
-    primary = decode_parallel(primary, axis)
-    cue = decode_parallel(cue, axis)
-    phase = unwrap_phase_with_cue(primary[0], cue[0], wave_count)
-    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
-    return phase, dphase, primary, cue
-
-
-def decode_with_cue(primary, cue, wave_count, axis=-4):
-    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
-        return decode_with_cue_sequential(primary, cue, wave_count, axis)
-    else:
-        return decode_with_cue_parallel(primary, cue, wave_count, axis)
-
-
-def stdmask(gray, background, phase, dphase, primary, cue, wave_count):
+def stdmask(gray, dark, phase, dphase, primary, cue, wave_count):
     # Threshold on saturation and under exposure
-    adjusted = gray - background
+    adjusted = gray - dark
     if adjusted.dtype == np.uint8:
         mask = np.logical_and(adjusted > 0.1 * 255, adjusted < 0.9 * 255)
     else:
@@ -112,24 +81,60 @@ def stdmask(gray, background, phase, dphase, primary, cue, wave_count):
     return mask
 
 
-def reconstruct(stereo, lit, dark, primary, cue, wave_count, shift=None):
-    gray, background = mega.rgb2gray(lit), mega.rgb2gray(dark)
-    primary = mega.rgb2gray(primary).astype(np.float64) / 255
-    cue = mega.rgb2gray(cue).astype(np.float64) / 255
-    phase, dphase, primary, cue = decode_with_cue(primary, cue, wave_count,
-                                                  axis=-4, n=1)
-    if shift is not None:
-        phase += shift
-    mask_args = gray, background, phase, dphase, primary, cue, wave_count
-    mask = stdmask(*mask_args)
-    phase *= phase.shape[2] / (2 * np.pi)
+def decode_with_cue_vectorized(gray, dark, primary, cue, N, maskfn=stdmask):
+    primary = decode_vectorized(primary, axis=-4)
+    cue = decode_vectorized(cue, axis=-4)
+    phase = unwrap_phase_with_cue(primary[0], cue[0], N)
+    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
+    mask = maskfn(gray, dark, phase, dphase, primary, cue, N)
+    return phase, dphase, mask
 
-    indices = sl.match_epipolar_maps(phase, mask)
-    colors = np.mean([mega.bilinear_interpolate(lit[i],
-                                                indices[i, :, 0],
-                                                indices[i, :, 1],
-                                                axes=(0, 1))
-                      for i in range(len(lit))], axis=0)
-    points = sl.triangulate_epipolar(stereo, indices)
-    normals = mega.estimate_normals(points)
-    return mega.pointcloud(points, colors, normals)
+
+def decode_with_cue_sequential(gray, dark, primary, cue, N, maskfn=stdmask):
+    primary = decode_sequential(primary, axis=-4)
+    cue = decode_sequential(cue, axis=-4)
+    phase = unwrap_phase_with_cue(primary[0], cue[0], N)
+    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
+    mask = maskfn(gray, dark, phase, dphase, primary, cue, N)
+    return phase, dphase, mask
+
+
+def decode_with_cue_parallel(gray, dark, primary, cue, N, maskfn=stdmask):
+    primary = decode_parallel(primary, axis=-4)
+    cue = decode_parallel(cue, axis=-4)
+    phase = unwrap_phase_with_cue(primary[0], cue[0], N)
+    dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
+    mask = maskfn(gray, dark, phase, dphase, primary, cue, N)
+    return phase, dphase, mask
+
+
+def decode_with_cue(gray, dark, primary, cue, N, maskfn=stdmask):
+    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
+        return decode_with_cue_sequential(gray, dark, primary, cue, N, maskfn)
+    else:
+        return decode_with_cue_parallel(gray, dark, primary, cue, N, maskfn)
+
+
+def decode2D_with_cue_sequential(gray, dark, P0, C0, P1, C1, N, Mfn=stdmask):
+    ph0, dph0, mask0 = decode_with_cue_sequential(gray, dark, P0, C0, N, Mfn)
+    ph1, dph1, mask1 = decode_with_cue_sequential(gray, dark, P1, C1, N, Mfn)
+    phase = np.stack((ph0, ph1), axis=2)
+    dphase = np.stack((dph0, dph1), axis=2)
+    mask = mask0 & mask0
+    return phase, dphase, mask
+
+
+def decode2D_with_cue_parallel(gray, dark, P0, C0, P1, C1, N, Mfn=stdmask):
+    ph0, dph0, mask0 = decode_with_cue_parallel(gray, dark, P0, C0, N, Mfn)
+    ph1, dph1, mask1 = decode_with_cue_parallel(gray, dark, P1, C1, N, Mfn)
+    phase = np.stack((ph0, ph1), axis=2)
+    dphase = np.stack((dph0, dph1), axis=2)
+    mask = mask0 & mask0
+    return phase, dphase, mask
+
+
+def decode2D_with_cue(gray, dark, P0, C0, P1, C1, N, Mfn=stdmask):
+    if 'MEGA_PARALLELIZE' in os.environ and not os.environ['MEGA_PARALLELIZE']:
+        return decode2D_with_cue_sequential(gray, dark, P0, C0, P1, C1, N, Mfn)
+    else:
+        return decode2D_with_cue_parallel(gray, dark, P0, C0, P1, C1, N, Mfn)

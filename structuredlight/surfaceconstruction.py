@@ -33,12 +33,12 @@ def triangulate(camera0, camera1, indices, offset=None, factor=None,
             tmp = np.stack((P0[i[1]], P0[i[2]], P1[i[3]], e[i[0]]), axis=0)
             C[i] = np.linalg.det(tmp.T)
         C = C[..., None, None]
-        vu = np.mgrid[0:image_shape[-3], 0:image_shape[-2]]
-        v, u = vu[None, 0, :, :], vu[None, 1, :, :]
-        offset = C[:, 0, 1, 0] - C[:, 2, 1, 0] * u - C[:, 0, 2, 0] * v
-        factor = -C[:, 0, 1, 2] + C[:, 2, 1, 2] * u + C[:, 0, 2, 2] * v
+        yx = np.mgrid[0:image_shape[-3], 0:image_shape[-2]].astype(np.float32)
+        y, x = yx[None, 0, :, :], yx[None, 1, :, :]
+        offset = C[:, 0, 1, 0] - C[:, 2, 1, 0] * x - C[:, 0, 2, 0] * y
+        factor = -C[:, 0, 1, 2] + C[:, 2, 1, 2] * x + C[:, 0, 2, 2] * y
     idx = (slice(None), *indices[0].astype(int).T)
-    xyzw = offset[idx] + factor[idx] * indices[None, 1, :, 1]
+    xyzw = offset[idx] + factor[idx] * indices[1][None, :, 1]
     return xyzw.T[:, :3] / xyzw.T[:, 3, None]
 
 
@@ -61,11 +61,12 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         p_lambda[:, :2] *= p[:, -1, None] / projector.focal_vector
         c_lambda[:, :2] *= c[:, -1, None] / camera.focal_vector
         # Rotate into common world space
-        p_lambda = p_lambda.dot(projector.R.T)
-        c_lambda = c_lambda.dot(camera.R.T)
-        # Make perpendicular to rays (needed for formulas below)
+        p_lambda = p_lambda.dot(projector.R)
+        c_lambda = c_lambda.dot(camera.R)
+        # Normalize rays
         p = normalize(p)
-        c = normalize(c)
+        c = -normalize(c)  # minus from formula, though it should not matter
+        # Make perpendicular to rays (needed for formulas below)
         p_lambda -= _vectordot(p_lambda, p) * p
         c_lambda -= _vectordot(c_lambda, c) * c
         # Finally, we make orthonormal sets x, x_lambda, x_omega
@@ -77,7 +78,16 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         X -= _vectordot(p, c_lambda) * p_omega
         Y = _vectordot((p_lambda - c_lambda), c_lambda) * p
         Y -= _vectordot(p, c_lambda) * p_lambda
-        return normalize(np.cross(X, Y))
+
+        n = normalize(np.cross(X, Y))
+
+        dev = np.array([((normals * p).sum(axis=1)),
+                        ((normals * c).sum(axis=1))])
+
+        dev = np.array([((-n * p).sum(axis=1)), ((n * c).sum(axis=1))])
+        i = np.argmax(np.abs(dev), axis=0)
+        n *= np.sign(dev[i, np.arange(len(i))])[:, None]
+        return n, np.abs(dev)
 
 
 def triangulate_epipolar(stereo, indices):

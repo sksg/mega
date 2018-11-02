@@ -101,7 +101,7 @@ class camera:
         if self._P_cache is None:
             if all(v is not None for v in (self.K, self.R, self.t)):
                     self._P_cache = self.K.dot(np.c_[self.R, self.t])
-            return self._P_cache
+        return self._P_cache
 
     @property
     def focal_vector(self):

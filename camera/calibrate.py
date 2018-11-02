@@ -23,21 +23,52 @@ def _cv_pixels(points2D):
 
 def camera(points3D, points2D, image_shape):
     """calibrate a single camera from world and image points."""
-    cv_kwargs = dict(objectPoints=points3D,
-                     imagePoints=_cv_pixels(points2D),
-                     imageSize=_cv_shape(image_shape),
-                     cameraMatrix=None, distCoeffs=None,  # No inital guess!
-                     flags=(cv2.CALIB_FIX_K3 +
-                            cv2.CALIB_FIX_ASPECT_RATIO +
-                            cv2.CALIB_ZERO_TANGENT_DIST))
-    Err, K, D, R_list, t_list = cv2.calibrateCamera(**cv_kwargs)
-    if Err is None:  # Unsuccessful
+    reprojection_error, K, distortion, R_list, t_list = cv2.calibrateCamera(
+        objectPoints=points3D,
+        imagePoints=_cv_pixels(points2D),
+        imageSize=_cv_shape(image_shape),
+        # No inital guess!
+        cameraMatrix=None, distCoeffs=None,
+        flags=(cv2.CALIB_FIX_K3 +
+               cv2.CALIB_FIX_ASPECT_RATIO +
+               cv2.CALIB_ZERO_TANGENT_DIST)
+    )
+    if reprojection_error is None:  # Unsuccessful
         return None, None
     # OpenCV often represents vectors as 2D. This leads to dimensions of 1:
-    D = np.squeeze(D)
+    distortion = np.squeeze(distortion)
     t_list = np.squeeze(t_list)
-    ghosts = [_camera(K, R, t, D) for (R, t) in zip(R_list, t_list)]
-    return _camera(K, distortion=D), ghosts
+    ghosts = [_camera(K, R, t, distortion) for (R, t) in zip(R_list, t_list)]
+    return _camera(K, distortion=distortion), ghosts
+
+
+def stereo(points3D, points2D, image_shapes, cameras=None):
+    """stereo calibrate two cameras from world and image points."""
+    if cameras is None:
+        cameras = [camera(points3D, points2D[0], image_shapes[0])[0],
+                   camera(points3D, points2D[1], image_shapes[1])[0]]
+    (reprojection_error,
+     K0, distortion0,
+     K1, distortion1,
+     R1, t1, E, F) = cv2.stereoCalibrate(
+        objectPoints=np.array(points3D),
+        imagePoints1=np.array(_cv_pixels(points2D[0])),
+        imagePoints2=np.array(_cv_pixels(points2D[1])),
+        imageSize=_cv_shape(image_shapes[0]),
+        cameraMatrix1=cameras[0].K,
+        distCoeffs1=cameras[0].distortion,
+        cameraMatrix2=cameras[1].K,
+        distCoeffs2=cameras[1].distortion,
+        flags=cv2.CALIB_FIX_INTRINSIC
+    )
+    if reprojection_error is None:  # Unsuccessful
+        return np.full(2, None), None, None
+    # OpenCV often uses 2D even for vectors. This leads to dimensions of 1:
+    distortion1 = np.squeeze(distortion1)
+    t1 = np.squeeze(t1)
+    cameras = [_camera(cameras[0].K, distortion=cameras[0].distortion),
+               _camera(cameras[1].K, R1, t1, cameras[1].distortion)]
+    return cameras, E, F
 
 
 def reprojection_errors(camera, points3D, points2D):
@@ -46,37 +77,17 @@ def reprojection_errors(camera, points3D, points2D):
             for p2D, rp2D in zip(points3D, reproj2D)]
 
 
-def stereo(points3D, points2D, image_shape, cameras=None):
-    """stereo calibrate two cameras from world and image points."""
-    cv_kwargs = dict(objectPoints=np.array(points3D),
-                     imagePoints1=np.array(_cv_pixels(points2D[0])),
-                     imagePoints2=np.array(_cv_pixels(points2D[1])),
-                     imageSize=_cv_shape(image_shape),
-                     cameraMatrix1=cameras[0].K if cameras else None,
-                     distCoeffs1=cameras[0].distortion if cameras else None,
-                     cameraMatrix2=cameras[1].K if cameras else None,
-                     distCoeffs2=cameras[1].distortion if cameras else None,
-                     flags=cv2.CALIB_FIX_INTRINSIC if cameras else 0)
-    Err, K0, D0, K1, D1, R1, t1, E, F = cv2.stereoCalibrate(**cv_kwargs)
-    if Err is None:  # Unsuccessful
-        return np.full(2, None), None, None
-    # OpenCV often uses 2D even for vectors. This leads to dimensions of 1:
-    D0 = np.squeeze(D0)
-    D1 = np.squeeze(D1)
-    t1 = np.squeeze(t1)
-    return [_camera(K0, distortion=D0), _camera(K1, R1, t1, D1)], E, F
-
-
 def rectify_stereo(cameras, image_shape):
     c0, c1 = cameras[:2]
     R, t = c1.relative_to(c0)
-    cv_kwargs = dict(cameraMatrix1=c0.K.astype('f8') if c0 else None,
-                     distCoeffs1=c0.distortion.astype('f8') if c0 else None,
-                     cameraMatrix2=c1.K.astype('f8') if c1 else None,
-                     distCoeffs2=c1.distortion.astype('f8') if c1 else None,
-                     imageSize=_cv_shape(image_shape),
-                     R=R.astype('f8'), T=t.astype('f8'), flags=0)
-    R0, R1, P0, P1 = cv2.stereoRectify(**cv_kwargs)[:4]
+    R0, R1, P0, P1 = cv2.stereoRectify(cameraMatrix1=c0.K.astype('f8'),
+                                       distCoeffs1=c0.distortion.astype('f8'),
+                                       cameraMatrix2=c1.K.astype('f8'),
+                                       distCoeffs2=c1.distortion.astype('f8'),
+                                       imageSize=_cv_shape(image_shape),
+                                       R=R.astype('f8'),
+                                       T=t.astype('f8'),
+                                       flags=0)[:4]
     return [_camera(R=R0, P=P0, distortion=c0.distortion),
             _camera(R=R1, P=P1, distortion=c1.distortion)]
 
@@ -173,7 +184,7 @@ def stereo_from_images(calibration_object, images):
 def interpolate_affine(image, points, mask=None, window=10, tol=50):
     # Using local homography to interpolate affine image
     if isinstance(points, np.ndarray) and points.shape == (2,):
-        window = np.mgrid[0:window, 0:window].T.reshape(-1, 2)
+        window = np.mgrid[-window:window, -window:window].T.reshape(-1, 2)
         p = points
         max = np.array(image.shape[-3:-1]) - 1
         p_window = np.clip(p.astype(int) + window, 0, max).T
@@ -182,11 +193,11 @@ def interpolate_affine(image, points, mask=None, window=10, tol=50):
         if m_window.sum() < tol:
             return np.nan
         else:
-            i_window = i_window[m_window]
-            p_window = p_window.T[m_window]
+            i_window = i_window[m_window][..., ::-1]
+            p_window = p_window.T[m_window].astype(np.float32)[..., ::-1]
             H, _ = cv2.findHomography(p_window, i_window, cv2.LMEDS)
-            p = H.dot(np.array([*p, 1]))
-            return p[:2] / p[2]
+            p = H.dot(np.array([*p[[1, 0]], 1])).astype(np.float32)
+            return p[[1, 0]] / p[2]
     elif isinstance(points[0], np.ndarray) and points[0].shape == (2,):
         return [interpolate_affine(image, p, mask, window, tol)
                 for p in points]
