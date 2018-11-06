@@ -67,9 +67,9 @@ def undistort_points(camera, points2D):
     return _cv_pixels(p2D).reshape(shape)
 
 
-def single_undistort_and_rectify(camera, new_camera, image_shape):
+def single_undistort_and_rectify(camera, R, new_camera, image_shape):
     return cv2.initUndistortRectifyMap(camera.K, camera.distortion,
-                                       new_camera.R, new_camera.P,
+                                       R, new_camera.P,
                                        _cv_shape(image_shape), cv2.CV_32F)
 
 
@@ -81,10 +81,11 @@ def undistort(cameras, image_shape):
     return undistorted.reshape(cameras.shape + undistorted.shape[1:])
 
 
-def undistort_and_rectify(cameras, new_cameras, image_shape):
-    def fn(x, y):
-        return single_undistort_and_rectify(x, y, image_shape)
+def undistort_and_rectify(cameras, R, new_cameras, image_shape):
+    def fn(x, y, z):
+        return single_undistort_and_rectify(x, y, z, image_shape)
     cameras, new_cameras = np.broadcast_arrays(cameras, new_cameras)
     undistorted = np.array(list(map(fn, cameras.flatten(),
+                                    np.array(R).reshape((-1, 3, 3)),
                                     new_cameras.flatten())))
     return undistorted.reshape(cameras.shape + undistorted.shape[1:])

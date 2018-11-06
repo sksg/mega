@@ -4,7 +4,8 @@ import numpy as np
 import os
 
 
-sequence_path = path + "sequence"
+path = "scans/20180913-subsurfacescattering-PTFE+Nylon66/"
+sequence_path = path + "sequence_0"
 calibration_path = path + "calibration"
 ply_file = "points.ply"
 
@@ -12,15 +13,23 @@ N = 16  # primary phaseshift step count
 M = 8  # cue phaseshift step count
 wn = 40.0  # phaseshift wave-number in inverse projector pixels
 
-print("Processing calibration sequence")
-frames = np.array([mega.read_images(calibration_path, 'frame0_[0-9]*.png'),
-                   mega.read_images(calibration_path, 'frame1_[0-9]*.png')])
 
+def frmsort(filenames):
+    names = [os.path.split(f)[1] for f in filenames]
+    indices = [int(f.split('_')[1].split('.')[0]) for f in names]
+    return [filenames[i] for i in np.argsort(indices)]
+
+frexp = ['frame0_[0-9]*.png', 'frame1_[0-9]*.png']
+
+print("Processing calibration sequence")
+frames = np.stack([mega.read_images(calibration_path, frexp[0], frmsort),
+                   mega.read_images(calibration_path, frexp[1], frmsort)])
 reference = mega.checkerboard((19, 12), 10, corse_rescale=0.5)
 points3D, pixels, _ = reference.find_in_images(frames)
-cameras, _, _ = mega.calibrate.stereo(points3D[0], pixels, shapes)
-rectified = mega.calibrate.rectify_stereo(cameras, gray0.shape)
-maps = mega.undistort_and_rectify(cameras, rectified, gray.shape)
+cameras, _, _ = mega.calibrate.stereo(points3D[0], pixels, (frames.shape,
+                                                            frames.shape))
+rectified, Rs = mega.calibrate.rectify_stereo(cameras, frames.shape)
+maps = mega.undistort_and_rectify(cameras, Rs, rectified, frames.shape)
 
 
 def split_array(array, split):
@@ -29,31 +38,37 @@ def split_array(array, split):
             for s0, s1 in zip(split[:-1], split[1:])]
 
 
+frexp = ['frames0_[0-9]*.png', 'frames1_[0-9]*.png']
 print("Processing capture sequence")
-frames = [mega.read_images(sequence_path, 'frame0_[0-9]*.png'),
-          mega.read_images(sequence_path, 'frame1_[0-9]*.png')]
-frames = mega.remap_images(frames, maps)
+frames = np.stack([mega.read_images(sequence_path, frexp[0], frmsort),
+                   mega.read_images(sequence_path, frexp[1], frmsort)])
+frames = mega.remap_images(frames, maps[:, None])
 
 color_frames = frames[:, 0]
 grayscale = mega.rgb2gray(frames.astype(np.float32)) / 255
 gray, dark, P, C = split_array(grayscale, (1, 1, N, M))
 ph, dph, mask = sl.phaseshift.decode_with_cue(gray, dark, P, C, wn)
-pixels = mega.match_epipolar_maps(ph, mask)
 
-# The undistorted projector gradient
-prj_gradient = np.array([2 * np.pi / prj_shape[1], 0.])[None, None, :]
-prj_gradient = np.broadcast_to(prj_gradient, prj_shape + (2,))
-cam_gradient = dph[..., 1, ::-1]  # row, col --> x, y
-cam_gradient = ndimage.gaussian_filter(cam_gradient, sigma=(3, 3, 0), order=0)
+pixels = sl.match_epipolar_maps(ph, mask)
 
-colors = color_frame[(*cam_pixels.T,)]
-points = sl.triangulate(camera, projector, (cam_pixels, prj_pixels),
-                        image_shape=gray.shape)
-normals, dev = sl.normals_from_gradients(*cameras, *pixels, *dph)
+if len(pixels) == 0:
+    print("No points reconstructed!")
+    exit()
+
+colors = color_frames[(0, *pixels[0].astype(int).T,)]
+points = sl.triangulate(*rectified, pixels, image_shape=color_frames.shape)
+normals, dev = sl.normals_from_gradients(*rectified, points, *pixels, *dph)
+# Alternatives:
+# normals, dev = sl.normals_from_depth(rectified[0], points, pixels[0],
+#                                      color_frames.shape)
+# normals, dev = sl.normals_from_SVD(rectified[0], points, pixels[0],
+#                                    color_frames.shape)
 
 # Filter points with too large normal deviation
 idx = (np.abs(dev) > 0.3).all(axis=0)
-colors, points, normals = colors[idx], points[idx], normals[idx]
-ply = mega.pointcloud(points, colors, normals)
+colors, points = colors[idx], points[idx]
+normals, _normals = normals[idx], _normals[idx]
+print(np.linalg.norm(normals - _normals, axis=1))
+ply = mega.pointcloud(points, colors, _normals)
 ply.writePLY(ply_file)
 print("Pointcloud exported to {}".format(ply_file))

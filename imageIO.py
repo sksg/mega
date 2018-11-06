@@ -11,6 +11,7 @@ def imread(path):
 
 
 def imwrite(path, image):
+    image = image.reshape((*image.shape[:2], -1))  # Make at least 3D.
     return cv2.imwrite(path, image[:, :, ::-1])  # RGB -> BGR
 
 

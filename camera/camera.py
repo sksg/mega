@@ -43,10 +43,12 @@ class camera:
                 R = flat[9:18].reshape((3, 3))
                 t = flat[18:21]
                 distortion = flat[21:]
-        if P is not None and R is not None:
+        if P is not None:
             if warn_on_ambiguity and any(v is not None for v in (K, t)):
                 print("Camera warning: K, R, t take precedence over R, P.")
             else:
+                if R is None:
+                    R = np.eye(3, dtype=P.dtype)
                 K = P[:3, :3].dot(R.T)
                 t = np.linalg.inv(K).dot(P[:3, 3])
         if K is None:

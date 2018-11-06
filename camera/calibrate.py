@@ -88,8 +88,7 @@ def rectify_stereo(cameras, image_shape):
                                        R=R.astype('f8'),
                                        T=t.astype('f8'),
                                        flags=0)[:4]
-    return [_camera(R=R0, P=P0, distortion=c0.distortion),
-            _camera(R=R1, P=P1, distortion=c1.distortion)]
+    return [_camera(P=P0), _camera(P=P1)], [R0, R1]
 
 
 class camera_calibration:
