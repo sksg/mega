@@ -46,8 +46,6 @@ def fit_planes(points, mask=None):
     barycenters = points.mean(axis=-2)[..., None, :]
     baryvectors = (points - barycenters)
     if mask is not None:
-        print(points.shape)
-        print(mask.shape)
         baryvectors[~mask] *= 0
     M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
     eig_values, eig_vectors = np.linalg.eigh(M)
@@ -60,32 +58,25 @@ def fit_planes(points, mask=None):
 def normals_from_SVD(camera, points3D, pixels, image_shape):
         def normalize(v):
             return v / np.linalg.norm(v, axis=-1, keepdims=True)
-        mask = np.zeros(image_shape[-3:-1], bool)
-        mask[(*pixels.T.astype(int),)] = 1
         xyz = np.zeros(image_shape[-3:-1] + (3,), points3D.dtype)
-        xyz[mask] = points3D
+        xyz[(*pixels.T.astype(int),)] = points3D
+        mask = np.zeros(image_shape[-3:-1] + (9,), bool)
+        mask[(*(pixels + np.array([-1, -1])).T.astype(int), 0)] = 1
+        mask[(*(pixels + np.array([0, -1])).T.astype(int), 1)] = 1
+        mask[(*(pixels + np.array([1, -1])).T.astype(int), 2)] = 1
+        mask[(*(pixels + np.array([-1, 0])).T.astype(int), 3)] = 1
+        mask[(*(pixels + np.array([0, 0])).T.astype(int), 4)] = 1
+        mask[(*(pixels + np.array([1, 0])).T.astype(int), 5)] = 1
+        mask[(*(pixels + np.array([-1, 1])).T.astype(int), 6)] = 1
+        mask[(*(pixels + np.array([0, 1])).T.astype(int), 7)] = 1
+        mask[(*(pixels + np.array([1, 1])).T.astype(int), 8)] = 1
 
-        p3D = np.stack((xyz[1:-1, 1:-1][mask[:-2, :-2]],
-                        xyz[1:-1, 1:-1][mask[1:-1, :-2]],
-                        xyz[1:-1, 1:-1][mask[2:, :-2]],
-                        xyz[1:-1, 1:-1][mask[:-2, 1:-1]],
-                        xyz[1:-1, 1:-1][mask[1:-1, 1:-1]],
-                        xyz[1:-1, 1:-1][mask[2:, 1:-1]],
-                        xyz[1:-1, 1:-1][mask[:-2, 2:]],
-                        xyz[1:-1, 1:-1][mask[1:-1, 2:]],
-                        xyz[1:-1, 1:-1][mask[2:, 2:]]), axis=-2)
-        _mask = np.stack((mask[1:-1, 1:-1][mask[:-2, :-2]],
-                          mask[1:-1, 1:-1][mask[1:-1, :-2]],
-                          mask[1:-1, 1:-1][mask[2:, :-2]],
-                          mask[1:-1, 1:-1][mask[:-2, 1:-1]],
-                          mask[1:-1, 1:-1][mask[1:-1, 1:-1]],
-                          mask[1:-1, 1:-1][mask[2:, 1:-1]],
-                          mask[1:-1, 1:-1][mask[:-2, 2:]],
-                          mask[1:-1, 1:-1][mask[1:-1, 2:]],
-                          mask[1:-1, 1:-1][mask[2:, 2:]]), axis=0)
-        n = normalize(fit_planes(p3D, _mask.reshape((-1, 9))))
+        p3D = np.stack([xyz[mask[:, :, i]] for i in range(9)], axis=-2)
+        nmsk = np.stack([mask[mask[:, :, i]][:, 4] for i in range(9)], axis=-1)
 
-        c = normalize(camera.position - points3D)
+        n = normalize(fit_planes(p3D, nmsk))
+
+        c = normalize(camera.position - xyz[mask[:, :, 4]])
         dev = (n * c).sum(axis=1)
         n *= np.sign(dev)[:, None]
         return n, np.abs(dev)
@@ -139,7 +130,7 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         c_lambda -= _vectordot(c_lambda, c) * c
         # Finally, we make orthonormal sets x, x_lambda, x_omega
         p_omega = normalize(np.cross(p, p_lambda))
-        c_omega = normalize(np.cross(c, c_lambda))
+        # c_omega = normalize(np.cross(c, c_lambda))
 
         # return c_lambda[:, [1, 0, 2]], np.ones_like(p[:, 0])
 
@@ -184,10 +175,7 @@ def match_epipolar_maps_vectorized(maps, masks):
 
     r, c0, c1 = match.nonzero()
     # TODO: Remove duplicates. These shouldn't be there, need to find out why.
-    _, idx, count = np.unique(np.stack((r, c0)).T,
-                              return_index=True,
-                              return_counts=True,
-                              axis=0)
+    _, idx = np.unique(np.stack((r, c0)).T, return_index=True, axis=0)
     r, c0, c1 = r[idx], c0[idx], c1[idx]
     c1f = map0[r, c0] - map1[r, c1]
     c1f /= map1[r, c1 + 1] - map1[r, c1]

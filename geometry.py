@@ -78,9 +78,9 @@ class pointcloud(object):
                                                      N))
 
             colored = all([p in vertex.data.dtype.names
-                           for p in ('blue', 'green', 'red')])
+                           for p in ('red', 'green', 'blue')])
             if colored:
-                color_data = vertex.data[['blue', 'green', 'red']]
+                color_data = vertex.data[['red', 'green', 'blue']]
                 N = len(color_data.dtype.names)
                 self.colors = color_data.view((color_data.dtype[0], N))
 
