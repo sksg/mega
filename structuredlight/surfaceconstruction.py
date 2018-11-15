@@ -46,7 +46,7 @@ def fit_planes(points, mask=None):
     barycenters = points.mean(axis=-2)[..., None, :]
     baryvectors = (points - barycenters)
     if mask is not None:
-        baryvectors[~mask] *= 0
+        baryvectors[np.logical_not(mask)] *= 0
     M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
     eig_values, eig_vectors = np.linalg.eigh(M)
     i = tuple(np.arange(0, eig_values.shape[i], dtype=int)
@@ -107,6 +107,8 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
             return v / np.linalg.norm(v, axis=-1, keepdims=True)
         p = points3D - projector.position
         c = points3D - camera.position
+        p_l = p.dot(projector.R.T)
+        c_l = c.dot(camera.R.T)
         p_grad = np.zeros_like(points3D)
         c_grad = np.zeros_like(points3D)
 
@@ -117,8 +119,8 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         p_lambda = p_grad / (p_grad * p_grad).sum(axis=-1, keepdims=True)
         c_lambda = c_grad / (c_grad * c_grad).sum(axis=-1, keepdims=True)
         # Project to the point depth
-        p_lambda[:, :2] *= p[:, -1, None] / projector.focal_vector
-        c_lambda[:, :2] *= c[:, -1, None] / camera.focal_vector
+        p_lambda[:, :2] *= p_l[:, -1, None] / projector.focal_vector
+        c_lambda[:, :2] *= c_l[:, -1, None] / camera.focal_vector
         # Rotate into common world space
         p_lambda = p_lambda.dot(projector.R)
         c_lambda = c_lambda.dot(camera.R)

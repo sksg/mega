@@ -49,7 +49,7 @@ def decode(data, axis=-4):
 def unwrap_phase_with_cue(phase, cue, wave_count):
     phase_cue = np.mod(cue - phase, 2 * np.pi)
     P = np.round(((phase_cue * wave_count) - phase) / (2 * np.pi))
-    return (phase + (2 * np.pi * P)) / wave_count
+    return (phase + (2 * np.pi * np.clip(P, 0, wave_count))) / wave_count
 
 
 def stdmask(gray, dark, phase, dphase, primary, cue, wave_count):
@@ -120,7 +120,7 @@ def decode2D_with_cue_sequential(gray, dark, P0, C0, P1, C1, N, Mfn=stdmask):
     ph1, dph1, mask1 = decode_with_cue_sequential(gray, dark, P1, C1, N, Mfn)
     phase = np.stack((ph0, ph1), axis=2)
     dphase = np.stack((dph0, dph1), axis=2)
-    mask = mask0 & mask0
+    mask = mask0 & mask1
     return phase, dphase, mask
 
 
@@ -129,7 +129,7 @@ def decode2D_with_cue_parallel(gray, dark, P0, C0, P1, C1, N, Mfn=stdmask):
     ph1, dph1, mask1 = decode_with_cue_parallel(gray, dark, P1, C1, N, Mfn)
     phase = np.stack((ph0, ph1), axis=2)
     dphase = np.stack((dph0, dph1), axis=2)
-    mask = mask0 & mask0
+    mask = mask0 & mask1
     return phase, dphase, mask
 
 
