@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import ndimage
+from scipy.fftpack import fft
 import os
 from concurrent.futures import ThreadPoolExecutor as thread_pool
 import mega
@@ -12,7 +13,7 @@ def _ndtake(indices, axis):  # simple slicing, much faster than np.take
 
 def decode_vectorized(data, axis=-4):
     axis = axis + int(axis < 0) * data.ndim
-    dft = np.fft.fft(data, axis=axis)
+    dft = fft(data, axis=axis)
     order1st = _ndtake(1, axis)  # first order Fourier transform
     phase = np.mod(-np.angle(dft[order1st]), 2 * np.pi)
     amplitude = np.absolute(dft[order1st])
@@ -29,12 +30,17 @@ def decode_sequential(data, axis=-4):
 
 
 def decode_parallel(data, axis=-4):
-    phase = np.empty(data.shape[:axis] + data.shape[axis + 1:], data.dtype)
+    shape = data.shape[:axis] + data.shape[axis + 1:]
+    print("decode_parallel. Shape =", shape, flush=True)
+    phase = np.empty(shape, data.dtype)
     amplitude, power = np.empty_like(phase), np.empty_like(phase)
     pool, futures = thread_pool(), {}
-    for i in np.ndindex(data.shape[:axis]):
-        futures[i] = pool.submit(decode_vectorized, data[i], axis)
-    for i in np.ndindex(data.shape[:axis]):
+    for i in np.ndindex(shape[:-2]):
+        print(i, flush=True)
+        exit()
+        data_i = i[:axis] + (slice(None),) + i[axis:]
+        futures[i] = pool.submit(decode_vectorized, data[data_i], axis)
+    for i in np.ndindex(shape[:-2]):
         phase[i], amplitude[i], power[i] = futures[i].result()  # asynchronous
     return phase, amplitude, power
 
@@ -48,8 +54,8 @@ def decode(data, axis=-4):
 
 def unwrap_phase_with_cue(phase, cue, wave_count):
     phase_cue = np.mod(cue - phase, 2 * np.pi)
-    P = np.round(((phase_cue * wave_count) - phase) / (2 * np.pi))
-    return (phase + (2 * np.pi * np.clip(P, 0, wave_count))) / wave_count
+    phase_cue = np.round(((phase_cue * wave_count) - phase) / (2 * np.pi))
+    return (phase + (2 * np.pi * phase_cue)) / wave_count
 
 
 def stdmask(gray, dark, phase, dphase, primary, cue, wave_count):
@@ -59,6 +65,9 @@ def stdmask(gray, dark, phase, dphase, primary, cue, wave_count):
         mask = np.logical_and(adjusted > 0.1 * 255, adjusted < 0.9 * 255)
     else:
         mask = np.logical_and(adjusted > 0.1, adjusted < 0.9)
+    # Threshold on phase
+    mask = np.logical_and(mask, phase >= 0.0)
+    mask = np.logical_and(mask, phase <= 2 * np.pi)
     # Threshold on amplitude at primary frequency
     mask = np.logical_and(mask, primary[1] > 0.01 * wave_count)
     # Threshold on amplitudes; must be at least 1/4 of the power
