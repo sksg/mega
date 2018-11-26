@@ -4,10 +4,13 @@ import os
 import re
 
 
-def imread(path):
+def imread(path, color=True):
     if not os.path.exists(path):
         raise FileNotFoundError("No such file: '" + path + "'.")
-    return cv2.imread(path)[:, :, ::-1]  # BGR -> RGB
+    if color:
+        return cv2.imread(path)[:, :, ::-1]  # BGR -> RGB
+    else:
+        return cv2.imread(path, cv2.IMREAD_GRAYSCALE)[:, :, None]
 
 
 def imwrite(path, image):
@@ -15,7 +18,7 @@ def imwrite(path, image):
     return cv2.imwrite(path, image[:, :, ::-1])  # RGB -> BGR
 
 
-def read_images(path, rexp=r'.*\.png', sort=None, filter=None):
+def read_images(path, rexp=r'.*\.png', sort=None, filter=None, color=True):
     files = [os.path.join(path, f)
              for f in os.listdir(path)
              if re.match(rexp, f)]
@@ -25,11 +28,11 @@ def read_images(path, rexp=r'.*\.png', sort=None, filter=None):
         files = sort(files)
     if files == []:
         return []
-    image0 = imread(files[0])
+    image0 = imread(files[0], color)
     images = np.empty((len(files), *image0.shape), dtype=image0.dtype)
     images[0] = image0
     for i, path in enumerate(files[1:], 1):
-        images[i] = imread(path)
+        images[i] = imread(path, color)
     return images
 
 

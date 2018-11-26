@@ -59,6 +59,10 @@ class pointcloud(object):
             vertex['nz'] = self.normals[:, 2].astype('f4')
 
         vertex = plyfile.PlyElement.describe(vertex, 'vertex')
+
+        ext = filename.split('.')[-1]
+        if ext != "ply" and ext != "PLY":
+            filename = filename + '.ply'
         plyfile.PlyData([vertex], text=ascii).write(filename)
         return self
 
@@ -100,7 +104,7 @@ def fit_planes(points, mask=None):
     barycenters = points.mean(axis=-2)[..., None, :]
     baryvectors = (points - barycenters)
     if mask is not None:
-        baryvectors[~mask] *= 0
+        baryvectors[np.logical_not(mask)] *= 0
     M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
     eig_values, eig_vectors = np.linalg.eigh(M)
     i = tuple(np.arange(0, eig_values.shape[i], dtype=int)
