@@ -109,6 +109,19 @@ def fit_planes(points, mask=None):
     return eig_vectors[indices]
 
 
+def PCA(points, mask=None):
+    barycenters = points.mean(axis=-2)[..., None, :]
+    baryvectors = (points - barycenters)
+    if mask is not None:
+        baryvectors[~mask] *= 0
+    M = (baryvectors[..., None, :] * baryvectors[..., None]).sum(axis=-3)
+    eig_values, eig_vectors = np.linalg.eigh(M)
+    i = tuple(np.arange(0, eig_values.shape[i], dtype=int)
+              for i in range(0, len(eig_values.shape) - 1))
+    indices = (*i, slice(None), np.abs(eig_values).argmin(axis=-1))
+    return eig_values, eig_vectors
+
+
 def align_normals(src_normals, ngb_normals):
     ngb_product = np.einsum('...i,...i ->...', src_normals, ngb_normals)
     flip = (1 - (ngb_product < 0).astype(int) * 2)[..., None]

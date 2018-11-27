@@ -27,18 +27,18 @@ def triangulate(camera0, camera1, indices, offset=None, factor=None,
     if offset is None or factor is None:
         P0 = camera0.P
         P1 = camera1.P
-        e = np.eye(4, dtype=np.float32)
-        C = np.empty((4, 3, 3, 3), np.float32)
+        e = np.eye(4, dtype=np.float64)
+        C = np.empty((4, 3, 3, 3), np.float64)
         for i in np.ndindex((4, 3, 3, 3)):
             tmp = np.stack((P0[i[1]], P0[i[2]], P1[i[3]], e[i[0]]), axis=0)
             C[i] = np.linalg.det(tmp.T)
         C = C[..., None, None]
-        yx = np.mgrid[0:image_shape[-3], 0:image_shape[-2]].astype(np.float32)
+        yx = np.mgrid[0:image_shape[-3], 0:image_shape[-2]].astype(np.float64)
         y, x = yx[None, 0, :, :], yx[None, 1, :, :]
         offset = C[:, 0, 1, 0] - C[:, 2, 1, 0] * x - C[:, 0, 2, 0] * y
         factor = -C[:, 0, 1, 2] + C[:, 2, 1, 2] * x + C[:, 0, 2, 2] * y
-    idx = (slice(None), *indices[0].astype(int).T)
-    xyzw = offset[idx] + factor[idx] * indices[1][None, :, 1]
+    idx = (slice(None), *np.round(indices[0]).astype(int).T)
+    xyzw = offset[idx] + factor[idx] * indices[1][None, :, 1].astype(np.float64)
     return xyzw.T[:, :3] / xyzw.T[:, 3, None]
 
 
@@ -107,6 +107,8 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
             return v / np.linalg.norm(v, axis=-1, keepdims=True)
         p = points3D - projector.position
         c = points3D - camera.position
+        p_local = p.dot(-projector.R.T)
+        c_local = c.dot(-camera.R.T)
         p_grad = np.zeros_like(points3D)
         c_grad = np.zeros_like(points3D)
 
@@ -117,11 +119,11 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         p_lambda = p_grad / (p_grad * p_grad).sum(axis=-1, keepdims=True)
         c_lambda = c_grad / (c_grad * c_grad).sum(axis=-1, keepdims=True)
         # Project to the point depth
-        p_lambda[:, :2] *= p[:, -1, None] / projector.focal_vector
-        c_lambda[:, :2] *= c[:, -1, None] / camera.focal_vector
+        p_lambda[:, :2] *= p_local[:, -1, None] / projector.focal_vector
+        c_lambda[:, :2] *= c_local[:, -1, None] / camera.focal_vector
         # Rotate into common world space
-        p_lambda = p_lambda.dot(projector.R)
-        c_lambda = c_lambda.dot(camera.R)
+        p_lambda = p_lambda.dot(-projector.R.T)
+        c_lambda = c_lambda.dot(-camera.R.T)
         # Normalize rays
         p = normalize(p)
         c = -normalize(c)  # minus from formula, though it should not matter
@@ -130,7 +132,7 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         c_lambda -= _vectordot(c_lambda, c) * c
         # Finally, we make orthonormal sets x, x_lambda, x_omega
         p_omega = normalize(np.cross(p, p_lambda))
-        # c_omega = normalize(np.cross(c, c_lambda))
+        c_omega = normalize(np.cross(c, c_lambda))
 
         # return c_lambda[:, [1, 0, 2]], np.ones_like(p[:, 0])
 
@@ -140,12 +142,24 @@ def normals_from_gradients(projector, camera, points3D, p_pixels, c_pixels,
         Y = _vectordot((p_lambda - c_lambda), c_lambda) * p
         Y -= _vectordot(p, c_lambda) * p_lambda
 
+        # Normals from c_omega
+        X_c = _vectordot(c_omega, p_lambda) * c
+        X_c -= _vectordot(c, p_lambda) * c_omega
+        Y_c = _vectordot((c_lambda - p_lambda), p_lambda) * c
+        Y_c -= _vectordot(c, p_lambda) * c_lambda
+
         n = normalize(np.cross(X, Y))
+        n_c = normalize(np.cross(X_c, Y_c))
 
         dev = np.array([((-n * p).sum(axis=1)), ((n * c).sum(axis=1))])
         i = np.argmax(np.abs(dev), axis=0)
         n *= np.sign(dev[i, np.arange(len(i))])[:, None]
-        return n, np.abs(dev)
+
+        dev_c = np.array([((-n_c * p).sum(axis=1)), ((n_c * c).sum(axis=1))])
+        i_c = np.argmax(np.abs(dev_c), axis=0)
+        n_c *= np.sign(dev[i_c, np.arange(len(i_c))])[:, None]
+
+        return n, dev, p_omega, c_omega, dev_c, n_c
 
 
 def match_epipolar_maps_vectorized(maps, masks):
@@ -157,11 +171,17 @@ def match_epipolar_maps_vectorized(maps, masks):
     nonzero0, nonzero1 = np.stack(mask0.nonzero()), np.stack(mask1.nonzero())
     b0, e0 = nonzero0.min(axis=1), nonzero0.max(axis=1) + 1
     b1, e1 = nonzero1.min(axis=1), nonzero1.max(axis=1) + 1
+    max_b = np.max([b0[0], b1[0]])
+    min_e = np.min([e0[0], e1[0]])
+    b0[0] = max_b
+    b1[0] = max_b
+    e0[0] = min_e
+    e1[0] = min_e
     nd_slice0 = tuple(slice(b, e) for b, e in zip(b0, e0))
     nd_slice1 = tuple(slice(b, e) for b, e in zip(b1, e1))
     mask0, mask1 = mask0[nd_slice0], mask1[nd_slice1]
     map0, map1 = maps[(0, *nd_slice0, 0)], maps[(1, *nd_slice1, 0)]
-
+    
     # both the left and right side of a match must exist
     match = np.logical_and(mask0[:, :, None], mask1[:, None, :-1])
     match = np.logical_and(match, mask1[:, None, 1:])
@@ -180,8 +200,8 @@ def match_epipolar_maps_vectorized(maps, masks):
     c1f = map0[r, c0] - map1[r, c1]
     c1f /= map1[r, c1 + 1] - map1[r, c1]
     c1f += c1
-    return np.swapaxes(np.array([(r, c0 + b0[1]), (r, c1f + b1[1])]), 1, 2)
-
+    return np.swapaxes(np.array([(r + b0[0], c0 + b0[1]), (r + b1[0], c1f + b1[1])]), 1, 2)
+    
 
 def match_epipolar_maps_sequential(maps, masks, step=1):
     pixels = []

@@ -91,8 +91,8 @@ def decode_with_cue_vectorized(gray, dark, primary, cue, N, maskfn=stdmask):
 
 
 def decode_with_cue_sequential(gray, dark, primary, cue, N, maskfn=stdmask):
-    primary = decode_sequential(primary, axis=-4)
-    cue = decode_sequential(cue, axis=-4)
+    primary = decode_sequential(primary.astype(np.float64), axis=-4)
+    cue = decode_sequential(cue.astype(np.float64), axis=-4)
     phase = unwrap_phase_with_cue(primary[0], cue[0], N)
     dphase = np.stack(np.gradient(np.squeeze(phase), axis=(-2, -1)), axis=-1)
     mask = maskfn(gray, dark, phase, dphase, primary, cue, N)

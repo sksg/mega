@@ -6,6 +6,7 @@ from .imageIO import imread
 from .imageIO import imwrite
 from .imageIO import read_images
 from .imageIO import write_images
+from .imageIO import write_combined_images
 
 # from camera package
 from .camera import camera

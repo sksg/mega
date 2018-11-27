@@ -77,6 +77,10 @@ class checkerboard:
                     if draw is not None:
                         cv2.drawChessboardCorners(draw[i], self.NxM, corners,
                                                   success)
+                else:
+                    mask[i] = False
+                    points3D.append(self.points3D)
+                    points2D.append(np.nan)
         return points3D, points2D, mask
 
 

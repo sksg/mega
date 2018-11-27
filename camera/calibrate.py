@@ -6,6 +6,7 @@ from .remap import remap_images
 from .remap import rectified_stereo_disparity_to_depth
 from .remap import undistort
 from .remap import undistort_and_rectify
+from itertools import compress
 
 
 def _cv_shape(shape):
@@ -23,9 +24,10 @@ def _cv_pixels(points2D):
 
 def camera(points3D, points2D, image_shape):
     """calibrate a single camera from world and image points."""
+    image_points = _cv_pixels(points2D)
     reprojection_error, K, distortion, R_list, t_list = cv2.calibrateCamera(
         objectPoints=points3D,
-        imagePoints=_cv_pixels(points2D),
+        imagePoints=image_points,
         imageSize=_cv_shape(image_shape),
         # No inital guess!
         cameraMatrix=None, distCoeffs=None,
@@ -40,6 +42,44 @@ def camera(points3D, points2D, image_shape):
     t_list = np.squeeze(t_list)
     ghosts = [_camera(K, R, t, distortion) for (R, t) in zip(R_list, t_list)]
     return _camera(K, distortion=distortion), ghosts
+
+
+def stereo_missing_data(points3D, points2D, image_shapes, mask):
+    """stereo calibrate two cameras from world and image points. where match is not certain"""
+
+    andmask = np.logical_and(mask[0], mask[1])
+    points_left = list(compress(points3D, mask[0]))
+    points_right = list(compress(points3D, mask[1]))
+    points_stereo = list(compress(points3D, andmask))
+    pixels_left = list(compress(points2D[0], mask[0]))
+    pixels_right = list(compress(points2D[1], mask[1]))
+    pixels_stereo_left = list(compress(points2D[0], andmask))
+    pixels_stereo_right = list(compress(points2D[1], andmask))
+
+    cameras = [camera(points_left, pixels_left, image_shapes[0])[0],
+                camera(points_right, pixels_right, image_shapes[1])[0]]
+    (reprojection_error,
+     K0, distortion0,
+     K1, distortion1,
+     R1, t1, E, F) = cv2.stereoCalibrate(
+        objectPoints=np.array(points_stereo),
+        imagePoints1=np.array(_cv_pixels(pixels_stereo_left)),
+        imagePoints2=np.array(_cv_pixels(pixels_stereo_right)),
+        imageSize=_cv_shape(image_shapes[0]),
+        cameraMatrix1=cameras[0].K,
+        distCoeffs1=cameras[0].distortion,
+        cameraMatrix2=cameras[1].K,
+        distCoeffs2=cameras[1].distortion,
+        flags=cv2.CALIB_FIX_INTRINSIC
+    )
+    if reprojection_error is None:  # Unsuccessful
+        return np.full(2, None), None, None
+    # OpenCV often uses 2D even for vectors. This leads to dimensions of 1:
+    distortion1 = np.squeeze(distortion1)
+    t1 = np.squeeze(t1)
+    cameras = [_camera(cameras[0].K, distortion=cameras[0].distortion),
+               _camera(cameras[1].K, R1, t1, cameras[1].distortion)]
+    return cameras, E, F
 
 
 def stereo(points3D, points2D, image_shapes, cameras=None):
