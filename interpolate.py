@@ -12,13 +12,14 @@ def _bilinear(image, i, j, out):
             _i = i[n:n + step, m:m + step]
             _j = j[n:n + step, m:m + step]
             im = cv2.remap(image, _j, _i, cv2.INTER_LINEAR)
-            out[n:n + step, m:m + step] = im
+            shape = out[n:n + step, m:m + step].shape
+            out[n:n + step, m:m + step] = im.reshape(shape)
 
 _bilinear_v = guvectorize(['(u1[:,:,::1],f4[:,::1],f4[:,::1],u1[:,:,::1])'],
                           '(n,m,c),(l,k),(l,k)->(l,k,c)')(_bilinear)
 
 
-def bilinear(image, i, j, kind=None):
+def bilinear(image, i, j):
     _i, _j = np.atleast_2d(i), np.atleast_2d(j)
     out = _bilinear_v(image, _i.astype(np.float32), _j.astype(np.float32))
     return out.reshape((*out.shape[:-3], *i.shape[-2:], out.shape[-1]))

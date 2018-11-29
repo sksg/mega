@@ -1,12 +1,23 @@
 import numpy as np
 
 
-pi = 1.0 * np.pi
-pi_2 = 2.0 * np.pi
-pi_4 = 4.0 * np.pi
-pi_8 = 8.0 * np.pi
+f32_PI = np.float32(1.0 * np.pi)
+f32_PI_2 = np.float32(2.0 * np.pi)
+f32_PI_4 = np.float32(4.0 * np.pi)
+f32_PI_8 = np.float32(8.0 * np.pi)
 
-inv_pi = 1.0 / (1.0 * np.pi)
-inv_pi_2 = 1.0 / (2.0 * np.pi)
-inv_pi_4 = 1.0 / (4.0 * np.pi)
-inv_pi_8 = 1.0 / (8.0 * np.pi)
+f32_1_PI = np.float32(1.0 / (1.0 * np.pi))
+f32_1_PI_2 = np.float32(1.0 / (2.0 * np.pi))
+f32_1_PI_4 = np.float32(1.0 / (4.0 * np.pi))
+f32_1_PI_8 = np.float32(1.0 / (8.0 * np.pi))
+
+
+f64_PI = np.float64(1.0 * np.pi)
+f64_PI_2 = np.float64(2.0 * np.pi)
+f64_PI_4 = np.float64(4.0 * np.pi)
+f64_PI_8 = np.float64(8.0 * np.pi)
+
+f64_1_PI = np.float64(1.0 / (1.0 * np.pi))
+f64_1_PI_2 = np.float64(1.0 / (2.0 * np.pi))
+f64_1_PI_4 = np.float64(1.0 / (4.0 * np.pi))
+f64_1_PI_8 = np.float64(1.0 / (8.0 * np.pi))

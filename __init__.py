@@ -1,5 +1,5 @@
 from .utilities import *
-from .geometry import *
+from .pointcloud import *
 
 from . import constants
 

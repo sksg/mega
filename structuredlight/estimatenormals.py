@@ -105,7 +105,6 @@ def from_gradients(projector, camera, points3D, p_pixels, c_pixels,
     p = normalize(p)
     c = -normalize(c)  # minus from formula, though it should not matter
     # Make perpendicular to rays (needed for formulas below)
-    err = (vectordot(p_lambda, p) - np.vdot(p_lambda, p))
     p_lambda -= vectordot(p_lambda, p) * p
     c_lambda -= vectordot(c_lambda, c) * c
     # Finally, we make orthonormal sets x, x_lambda, x_omega
