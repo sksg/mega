@@ -42,6 +42,13 @@ def parallelize(setting):
         os.environ['MEGA_PARALLELIZE'] = 0
 
 
+def vectordot(u, v, *args, **kwargs):
+    """Specilization of the dot-operator. u and v are ndarrays of vectors"""
+    u, v = np.broadcast_arrays(u, v)
+    return np.einsum('...i,...i ->...', u, v).reshape(*u.shape[:-1], 1)
+
+
+
 # Precomputed LUTs for combine_HDR
 triangle_weights_half = np.arange(1, 129)
 triangle_weights = np.empty((256,))
