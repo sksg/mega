@@ -15,7 +15,7 @@ def find_checkerboard(image, NxM, coarse=None, check=None, term=None):
         cv2.cornerSubPix(image, corners, (11, 11), (-1, -1), term)
         return corners[..., ::-1]
     else:
-        return np.zeros(corners.shape) * np.nan
+        return np.zeros((np.prod(NxM),2)) * np.nan
 
 
 class checkerboard:

@@ -18,6 +18,9 @@ def cv_points(points, dtype=np.float32, mask=None):
             return points[..., coords_slice].astype(dtype)
         elif len(points.shape) == 2:
             return points[mask][..., coords_slice].astype(dtype)
+        elif len(points.shape) > 2:
+            mask = mask.any(axis=-1)
+            return points[mask][..., coords_slice].astype(dtype)
     result = []
     for i, ps in enumerate(points):
         cv_ps = cv_points(ps)
