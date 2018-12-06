@@ -41,8 +41,6 @@ def stdmask(gray, dark, phase, dphase, primary, cue, wave_count):
     dph = np.linalg.norm(dphase, axis=-1)
     mask = np.logical_and(mask, dph < 1e-2)
     mask = np.logical_and(mask, dph > 1e-8)
-    # Must point at least slightly to the left side
-    mask = np.logical_and(mask, dphase[..., 1] > 1e-8)
     # Remove borders
     mask[..., [0, -1]] = 0
     mask[..., [0, -1], :] = 0
