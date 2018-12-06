@@ -11,21 +11,29 @@ p_kwargs = dict(default='sequential')
 
 @parallize('(v,n,3),(v,n,2),_->(),(v)', **p_kwargs)
 def calibrate(P3D, P2D, imshape):
+    
+    notnans_3D = ~np.isnan(P3D).any(axis=-1)
+    notnans_2D = ~np.isnan(P2D).any(axis=-1)
+    notnans = notnans_3D & notnans_2D
+    P3D_corrected = cv_points(P3D, mask=notnans)
+    P2D_corrected = cv_points(P2D, mask=notnans)
+
     reprojection_error, K, distortion, R_list, t_list = cv2.calibrateCamera(
-        objectPoints=cv_points(P3D),
-        imagePoints=cv_points(P2D),
+        objectPoints=P3D_corrected,
+        imagePoints=P2D_corrected,
         imageSize=cv_shape(imshape),
         cameraMatrix=None, distCoeffs=None,  # No inital guess!
         flags=(cv2.CALIB_FIX_K3 +
                cv2.CALIB_FIX_ASPECT_RATIO +
                cv2.CALIB_ZERO_TANGENT_DIST)
     )
+    ghosts = np.full(P3D.shape[:-2], None)
     if reprojection_error is None:  # Unsuccessful
-        return None, None
+        return None, ghosts
     # OpenCV often represents vectors as 2D arrays:
     distortion = np.squeeze(distortion)
     t_list = np.squeeze(t_list)
-    ghosts = np.array([camera_class(K, R, t, distortion, imshape)
+    ghosts[notnans.any(axis=-1)] = np.array([camera_class(K, R, t, distortion, imshape)
                       for (R, t) in zip(R_list, t_list)], object)
     cam = camera_class(K, distortion=distortion,
                        imshape=cv_shape(imshape)[::-1])

@@ -1,11 +1,6 @@
 import numpy as np
 import os
-
-
-def vectordot(u, v, *args, **kwargs):
-    """Specilization of the dot-operator. u and v are ndarrays of vectors"""
-    u, v = np.broadcast_arrays(u, v)
-    return np.einsum('...i,...i ->...', u, v).reshape(*u.shape[:-1], 1)
+from ..utilities import vectordot
 
 
 def fit_planes(points, mask=None):
