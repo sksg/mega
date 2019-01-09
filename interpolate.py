@@ -61,14 +61,19 @@ def bilinear_rescale(image, scale, scale_W=None):
 
 
 def _affine(image, points, mask=None, window=10, tol=50):
+    if np.isnan(points).any():
+        return np.zeros(2) * np.nan
     window = np.mgrid[-window:window, -window:window].T.reshape(-1, 2)
     p = points
     end = np.array(image.shape[-3:-1]) - 1
-    p_window = np.clip(p.astype(int) + window, 0, end).T
+    p_window = np.clip(np.round(p).astype(int) + window, 0, end).T
     i_window = image[(*p_window,)]
+    if mask is None:
+        mask = ~np.isnan(image).any(axis=-1)
+        
     m_window = np.squeeze(mask[(*p_window,)])
     if m_window.sum() < tol:
-        return np.nan
+        return np.zeros(2) * np.nan
     else:
         i_window = i_window[m_window][..., ::-1]
         p_window = p_window.T[m_window].astype(np.float32)[..., ::-1]
@@ -76,5 +81,5 @@ def _affine(image, points, mask=None, window=10, tol=50):
         p = H.dot(np.array([*p[[1, 0]], 1])).astype(np.float32)
         return p[[1, 0]] / p[2]
 
-_exc = (3, 4, 5, 'mask', 'window', 'tol')
-affine = np.vectorize(_affine, excluded=_exc, signature='(n,m,2),(2)->(2)')
+_exc = (4, 5, 'window', 'tol')
+affine = np.vectorize(_affine, excluded=_exc, signature='(n,m,2),(2),(n,m)->(2)')
