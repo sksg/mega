@@ -35,6 +35,7 @@ class projector:
             glfw.terminate()
             raise RuntimeError('GLFW could not create window.')
         glfw.make_context_current(self.window)
+        glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
 
         # OpenGL context (through QT)
         self.context = moderngl.create_context()
@@ -159,11 +160,9 @@ if __name__ == '__main__':
             images[i] = cv2.imread(path)
 
     def continue_query(i, N):
-        query = input("Enter to continue, or q[uit]... ")
+        proj.wait(1)
+        query = input("Enter to continue, or q[uit]... ")  # blocks the program
         if len(query) > 0 and query.lower()[0] == "q":
             exit()
 
     proj.draw_sequence(images, delay=0, callbackfn=continue_query)
-
-    proj.clear()
-    proj.wait(1)  # delayed shutdown
